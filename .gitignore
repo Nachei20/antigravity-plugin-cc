@@ -1,0 +1,11 @@
+# Antigravity background jobs and logs
+.agy-jobs/
+*.log
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Operating System Files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+{
+  "name": "antigravity-plugin-cc",
+  "version": "1.0.0",
+  "description": "Google Antigravity plugin for Claude Code: cross-model code review, adversarial design stress-tests, and task rescue delegation.",
+  "type": "module",
+  "main": "bin/agy-companion.mjs",
+  "bin": {
+    "antigravity-companion": "bin/agy-companion.mjs"
+  },
+  "scripts": {
+    "test": "node bin/agy-companion.mjs setup"
+  },
+  "keywords": [
+    "claude-code",
+    "antigravity",
+    "gemini",
+    "code-review",
+    "adversarial-review",
+    "claude-plugin"
+  ],
+  "author": "Nacho",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
