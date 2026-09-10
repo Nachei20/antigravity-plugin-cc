@@ -25,5 +25,8 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: Verify Version Synchronization
+        run: npm run check-version
+
       - name: Run Test Suite
         run: npm test

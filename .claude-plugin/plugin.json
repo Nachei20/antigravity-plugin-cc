@@ -4,6 +4,7 @@
   "description": "Google Antigravity plugin for Claude Code: cross-model code review, adversarial design stress-tests, and task rescue delegation.",
   "author": "Nacho",
   "license": "Apache-2.0",
+  "hooks": "./hooks/hooks.json",
   "commands": {
     "review": "./commands/review.md",
     "adversarial-review": "./commands/adversarial-review.md",
@@ -16,5 +17,8 @@
   },
   "agents": {
     "antigravity-rescue": "./agents/antigravity-rescue.md"
+  },
+  "skills": {
+    "antigravity-review": "./skills/antigravity-review/SKILL.md"
   }
 }

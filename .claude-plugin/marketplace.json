@@ -3,6 +3,7 @@
   "plugins": [
     {
       "name": "antigravity",
+      "version": "1.0.0",
       "source": "./",
       "description": "Cross-model code review, adversarial design stress-tests, and rescue task delegation using Google Antigravity directly inside Claude Code."
     }
