@@ -8,7 +8,8 @@
     "antigravity-companion": "bin/agy-companion.mjs"
   },
   "scripts": {
-    "test": "node bin/agy-companion.mjs setup"
+    "test": "node --test tests/**/*.test.mjs",
+    "test:setup": "node bin/agy-companion.mjs setup"
   },
   "keywords": [
     "claude-code",
