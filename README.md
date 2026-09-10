@@ -1,5 +1,6 @@
 # Antigravity Plugin for Claude Code (`antigravity-plugin-cc`)
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Claude%20Code-purple.svg)](https://claude.ai/code)
 [![Engine](https://img.shields.io/badge/engine-Google%20Antigravity-green.svg)](https://deepmind.google/)
 
@@ -149,3 +150,8 @@ For large reviews that take time:
      [Background PID & Logs] ────────────────┘
 ```
 
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
