@@ -1,4 +1,4 @@
-# Antigravity Plugin for Claude Code (`antigravity-plugin-cc`)
+# Antigravity Plugin for Claude Code
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Claude%20Code-purple.svg)](https://claude.ai/code)
