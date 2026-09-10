@@ -13,12 +13,14 @@
     "status": "./commands/status.md",
     "result": "./commands/result.md",
     "cancel": "./commands/cancel.md",
-    "setup": "./commands/setup.md"
+    "setup": "./commands/setup.md",
+    "loop": "./commands/loop.md"
   },
   "agents": {
     "antigravity-rescue": "./agents/antigravity-rescue.md"
   },
   "skills": {
-    "antigravity-review": "./skills/antigravity-review/SKILL.md"
+    "antigravity-review": "./skills/antigravity-review/SKILL.md",
+    "claudegravity-loop": "./skills/claudegravity-loop/SKILL.md"
   }
 }
