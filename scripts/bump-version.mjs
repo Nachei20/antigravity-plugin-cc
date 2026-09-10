@@ -6,12 +6,14 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
 const PKG_PATH = join(ROOT, 'package.json');
-const PLUGIN_PATH = join(ROOT, '.claude-plugin', 'plugin.json');
+const PLUGIN_PATH = join(ROOT, 'plugins', 'antigravity', '.claude-plugin', 'plugin.json');
 const MARKETPLACE_PATH = join(ROOT, '.claude-plugin', 'marketplace.json');
 
 const isCheck = process.argv.includes('--check');
@@ -35,8 +37,8 @@ const mktVer = mkt.plugins?.[0]?.version || pluginVer;
 
 if (isCheck) {
   console.log(`Checking version synchronization:`);
-  console.log(`  package.json:               ${pkgVer}`);
-  console.log(`  .claude-plugin/plugin.json: ${pluginVer}`);
+  console.log(`  package.json:                              ${pkgVer}`);
+  console.log(`  plugins/antigravity/.claude-plugin/plugin: ${pluginVer}`);
   if (mkt.plugins?.[0]?.version) {
     console.log(`  .claude-plugin/marketplace: ${mkt.plugins[0].version}`);
   }
@@ -87,5 +89,5 @@ writeJson(MARKETPLACE_PATH, mkt);
 
 console.log(`\n✅ Successfully bumped and synchronized version to ${newVersion} in:`);
 console.log(`  - package.json`);
-console.log(`  - .claude-plugin/plugin.json`);
+console.log(`  - plugins/antigravity/.claude-plugin/plugin.json`);
 console.log(`  - .claude-plugin/marketplace.json\n`);

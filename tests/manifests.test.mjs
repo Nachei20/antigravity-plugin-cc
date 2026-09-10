@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
+const PLUGIN_DIR = join(ROOT, 'plugins', 'antigravity');
 
 test('package.json exists and is valid', () => {
   const pkgPath = join(ROOT, 'package.json');
@@ -17,8 +20,8 @@ test('package.json exists and is valid', () => {
   assert.ok(pkg.bin['antigravity-companion'], 'package must declare binary');
 });
 
-test('.claude-plugin/plugin.json is valid and all command files exist', () => {
-  const pluginPath = join(ROOT, '.claude-plugin', 'plugin.json');
+test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command files exist', () => {
+  const pluginPath = join(PLUGIN_DIR, '.claude-plugin', 'plugin.json');
   assert.ok(existsSync(pluginPath), 'plugin.json must exist');
 
   const plugin = JSON.parse(readFileSync(pluginPath, 'utf-8'));
@@ -27,7 +30,7 @@ test('.claude-plugin/plugin.json is valid and all command files exist', () => {
 
   // Verify each command target file exists
   for (const [cmdName, cmdRelPath] of Object.entries(plugin.commands)) {
-    const fullCmdPath = join(ROOT, cmdRelPath);
+    const fullCmdPath = join(PLUGIN_DIR, cmdRelPath);
     assert.ok(
       existsSync(fullCmdPath),
       `Command '${cmdName}' points to non-existent file: ${cmdRelPath}`
@@ -38,7 +41,7 @@ test('.claude-plugin/plugin.json is valid and all command files exist', () => {
   assert.ok(plugin.agents, 'plugin must define agents');
 
   for (const [agentName, agentRelPath] of Object.entries(plugin.agents)) {
-    const fullAgentPath = join(ROOT, agentRelPath);
+    const fullAgentPath = join(PLUGIN_DIR, agentRelPath);
     assert.ok(
       existsSync(fullAgentPath),
       `Agent '${agentName}' points to non-existent file: ${agentRelPath}`
@@ -47,7 +50,7 @@ test('.claude-plugin/plugin.json is valid and all command files exist', () => {
 
   // Verify hooks declaration and targets
   assert.ok(plugin.hooks, 'plugin must define hooks file');
-  const fullHooksPath = join(ROOT, plugin.hooks);
+  const fullHooksPath = join(PLUGIN_DIR, plugin.hooks);
   assert.ok(existsSync(fullHooksPath), `Hooks file does not exist: ${plugin.hooks}`);
   const hooksData = JSON.parse(readFileSync(fullHooksPath, 'utf-8'));
   assert.ok(hooksData.hooks, 'hooks.json must contain hooks object');
@@ -57,7 +60,7 @@ test('.claude-plugin/plugin.json is valid and all command files exist', () => {
   // Verify skills declaration and targets
   assert.ok(plugin.skills, 'plugin must define skills');
   for (const [skillName, skillRelPath] of Object.entries(plugin.skills)) {
-    const fullSkillPath = join(ROOT, skillRelPath);
+    const fullSkillPath = join(PLUGIN_DIR, skillRelPath);
     assert.ok(
       existsSync(fullSkillPath),
       `Skill '${skillName}' points to non-existent file: ${skillRelPath}`
@@ -74,11 +77,12 @@ test('.claude-plugin/marketplace.json is valid', () => {
   assert.ok(Array.isArray(mkt.plugins), 'marketplace must have plugins array');
   assert.ok(mkt.plugins.length > 0, 'marketplace must declare at least one plugin');
   assert.equal(mkt.plugins[0].name, 'antigravity');
+  assert.equal(mkt.plugins[0].source, './plugins/antigravity', 'marketplace must declare source as ./plugins/antigravity');
 });
 
 test('lifecycle script executes cleanly on start and end', () => {
-  const lifecyclePath = join(ROOT, 'scripts', 'lifecycle.mjs');
-  assert.ok(existsSync(lifecyclePath), 'scripts/lifecycle.mjs must exist');
+  const lifecyclePath = join(PLUGIN_DIR, 'scripts', 'lifecycle.mjs');
+  assert.ok(existsSync(lifecyclePath), 'plugins/antigravity/scripts/lifecycle.mjs must exist');
 
   const startRes = spawnSync('node', [lifecyclePath, 'start'], { cwd: ROOT, encoding: 'utf-8' });
   assert.equal(startRes.status, 0);

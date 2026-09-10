@@ -8,10 +8,12 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
 const JOBS_DIR = join(process.cwd(), '.agy-jobs');
 const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 

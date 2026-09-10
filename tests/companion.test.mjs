@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
 const COMPANION_PATH = join(ROOT, 'bin', 'agy-companion.mjs');
 const JOBS_DIR = join(ROOT, '.agy-jobs');
 const STATE_FILE = join(JOBS_DIR, 'last-job.json');
