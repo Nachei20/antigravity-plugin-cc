@@ -8,9 +8,13 @@
     "review": "./commands/review.md",
     "adversarial-review": "./commands/adversarial-review.md",
     "rescue": "./commands/rescue.md",
+    "transfer": "./commands/transfer.md",
     "status": "./commands/status.md",
     "result": "./commands/result.md",
     "cancel": "./commands/cancel.md",
     "setup": "./commands/setup.md"
+  },
+  "agents": {
+    "antigravity-rescue": "./agents/antigravity-rescue.md"
   }
 }

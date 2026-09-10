@@ -32,6 +32,17 @@ test('.claude-plugin/plugin.json is valid and all command files exist', () => {
       `Command '${cmdName}' points to non-existent file: ${cmdRelPath}`
     );
   }
+
+  assert.ok(plugin.commands.transfer, 'plugin must include transfer command');
+  assert.ok(plugin.agents, 'plugin must define agents');
+
+  for (const [agentName, agentRelPath] of Object.entries(plugin.agents)) {
+    const fullAgentPath = join(ROOT, agentRelPath);
+    assert.ok(
+      existsSync(fullAgentPath),
+      `Agent '${agentName}' points to non-existent file: ${agentRelPath}`
+    );
+  }
 });
 
 test('.claude-plugin/marketplace.json is valid', () => {

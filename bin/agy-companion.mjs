@@ -2,13 +2,13 @@
 
 /**
  * Antigravity Companion for Claude Code
- * Orchestrates cross-model code review, adversarial review, and rescue operations
- * using the Google Antigravity CLI (`agy`).
+ * Orchestrates cross-model code review, adversarial review, task rescue,
+ * and session transfer using the Google Antigravity CLI (`agy`).
  */
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
 
@@ -17,7 +17,7 @@ const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 
 // --- Helper Functions ---
 
-function getAgyExecutable() {
+export function getAgyExecutable() {
   if (process.env.AGY_BIN_PATH && existsSync(process.env.AGY_BIN_PATH)) {
     return process.env.AGY_BIN_PATH;
   }
@@ -44,7 +44,7 @@ function getAgyExecutable() {
   return 'agy';
 }
 
-function getGitDiff(baseRef = null) {
+export function getGitDiff(baseRef = null) {
   try {
     let diffArgs = ['diff', 'HEAD'];
     if (baseRef) {
@@ -79,7 +79,7 @@ function isProcessAlive(pid) {
 
 // --- Subcommands ---
 
-function cmdSetup() {
+export function cmdSetup() {
   console.log('\n=== Antigravity Companion Diagnostic ===\n');
   const agyPath = getAgyExecutable();
   console.log(`Detected Antigravity CLI binary: ${agyPath}`);
@@ -98,14 +98,15 @@ function cmdSetup() {
     console.error('Git status: NOT FOUND');
   }
 
-  console.log('\nSetup verification complete. You can now use:\n');
-  console.log('  /antigravity:review [--base <ref>] [--background]');
-  console.log('  /antigravity:adversarial-review <focus-topic>');
-  console.log('  /antigravity:rescue <task-or-bug>');
+  console.log('\nSetup verification complete. Available commands:\n');
+  console.log('  /antigravity:review [--base <ref>] [--background] [--model <m>] [--effort <e>]');
+  console.log('  /antigravity:adversarial-review [--base <ref>] [--background] [--model <m>] <focus>');
+  console.log('  /antigravity:rescue [--model <m>] [--effort <e>] <task-or-bug>');
+  console.log('  /antigravity:transfer [--model <m>] [--effort <e>] [notes]');
   console.log('  /antigravity:status | /antigravity:result | /antigravity:cancel\n');
 }
 
-function runAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', background = false }) {
+export function runAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', model = null, background = false }) {
   const agyPath = getAgyExecutable();
   ensureJobsDir();
 
@@ -113,6 +114,9 @@ function runAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', backgr
   const logFile = join(JOBS_DIR, `job-${timestamp}.log`);
 
   const agyArgs = ['-p', prompt, '--mode', mode, '--effort', effort];
+  if (model) {
+    agyArgs.push('--model', model);
+  }
 
   if (background) {
     const outFd = openSync(logFile, 'a');
@@ -140,7 +144,7 @@ function runAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', backgr
     return;
   }
 
-  console.log(`\n[Antigravity] Running ${commandName} (effort: ${effort}, mode: ${mode})...\n`);
+  console.log(`\n[Antigravity] Running ${commandName} (effort: ${effort}, mode: ${mode}${model ? `, model: ${model}` : ''})...\n`);
   const proc = spawnSync(agyPath, agyArgs, {
     encoding: 'utf-8',
     stdio: 'inherit',
@@ -153,15 +157,21 @@ function runAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', backgr
   }
 }
 
-async function cmdReview(args) {
+export async function cmdReview(args) {
   let baseRef = null;
   let background = false;
+  let model = null;
+  let effort = 'high';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--base' && args[i + 1]) {
       baseRef = args[++i];
     } else if (args[i] === '--background') {
       background = true;
+    } else if (args[i] === '--model' && args[i + 1]) {
+      model = args[++i];
+    } else if (args[i] === '--effort' && args[i + 1]) {
+      effort = args[++i];
     }
   }
 
@@ -185,16 +195,18 @@ async function cmdReview(args) {
     status ? `Git Status:\n${status}\n` : '',
     'Diff:',
     '```diff',
-    diff.slice(0, 150000), // Protect against mega-diff overflows
+    diff.slice(0, 150000),
     '```',
   ].join('\n');
 
-  runAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort: 'high', background });
+  runAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort, model, background });
 }
 
-async function cmdAdversarialReview(args) {
+export async function cmdAdversarialReview(args) {
   let baseRef = null;
   let background = false;
+  let model = null;
+  let effort = 'high';
   const focusWords = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -202,6 +214,10 @@ async function cmdAdversarialReview(args) {
       baseRef = args[++i];
     } else if (args[i] === '--background') {
       background = true;
+    } else if (args[i] === '--model' && args[i + 1]) {
+      model = args[++i];
+    } else if (args[i] === '--effort' && args[i + 1]) {
+      effort = args[++i];
     } else {
       focusWords.push(args[i]);
     }
@@ -227,11 +243,25 @@ async function cmdAdversarialReview(args) {
     diff ? `Diff:\n\`\`\`diff\n${diff.slice(0, 150000)}\n\`\`\`` : '(No diff found; auditing stated architectural focus)',
   ].join('\n');
 
-  runAgyJob({ commandName: 'Adversarial Review', prompt, mode: 'plan', effort: 'high', background });
+  runAgyJob({ commandName: 'Adversarial Review', prompt, mode: 'plan', effort, model, background });
 }
 
-async function cmdRescue(args) {
-  const taskText = args.join(' ').trim();
+export async function cmdRescue(args) {
+  let model = null;
+  let effort = 'high';
+  const taskWords = [];
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--model' && args[i + 1]) {
+      model = args[++i];
+    } else if (args[i] === '--effort' && args[i + 1]) {
+      effort = args[++i];
+    } else {
+      taskWords.push(args[i]);
+    }
+  }
+
+  const taskText = taskWords.join(' ').trim();
   if (!taskText) {
     console.error('Error: Please specify the task or error description for /antigravity:rescue.');
     process.exit(1);
@@ -248,10 +278,60 @@ async function cmdRescue(args) {
     status ? `Current Git Status:\n${status}\n` : '',
   ].join('\n');
 
-  runAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort: 'high', background: false });
+  runAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort, model, background: false });
 }
 
-function cmdStatus() {
+export async function cmdTransfer(args) {
+  let model = null;
+  let effort = 'high';
+  const notesWords = [];
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--model' && args[i + 1]) {
+      model = args[++i];
+    } else if (args[i] === '--effort' && args[i + 1]) {
+      effort = args[++i];
+    } else {
+      notesWords.push(args[i]);
+    }
+  }
+
+  const userNotes = notesWords.join(' ').trim();
+  const { diff, status } = getGitDiff();
+
+  let branch = 'main';
+  try {
+    const branchRes = spawnSync('git', ['branch', '--show-current'], { encoding: 'utf-8' });
+    if (branchRes.status === 0 && branchRes.stdout.trim()) {
+      branch = branchRes.stdout.trim();
+    }
+  } catch {}
+
+  const prompt = [
+    'Session transferred from Claude Code to Google Antigravity.',
+    `Active Git Branch: ${branch}`,
+    status ? `Git Status:\n${status}\n` : '',
+    diff ? `Uncommitted Changes:\n\`\`\`diff\n${diff.slice(0, 50000)}\n\`\`\`\n` : '',
+    userNotes ? `User instructions / Context:\n${userNotes}` : 'Please assist the user with continuing their development work.',
+  ].join('\n');
+
+  const agyPath = getAgyExecutable();
+  const agyArgs = ['-i', prompt, '--mode', 'accept-edits', '--effort', effort];
+  if (model) agyArgs.push('--model', model);
+
+  console.log(`\n[Antigravity] Transferring session to interactive Antigravity CLI (branch: ${branch})...\n`);
+
+  const proc = spawnSync(agyPath, agyArgs, {
+    stdio: 'inherit',
+    encoding: 'utf-8',
+  });
+
+  if (proc.status !== 0) {
+    process.exit(proc.status || 1);
+  }
+}
+
+export function cmdStatus() {
   if (!existsSync(STATE_FILE)) {
     console.log('[Antigravity] No active or recorded background jobs.');
     return;
@@ -273,7 +353,7 @@ function cmdStatus() {
   }
 }
 
-function cmdResult() {
+export function cmdResult() {
   if (!existsSync(STATE_FILE)) {
     console.log('[Antigravity] No job records found.');
     return;
@@ -291,7 +371,7 @@ function cmdResult() {
   console.log('\n==================================================\n');
 }
 
-function cmdCancel() {
+export function cmdCancel() {
   if (!existsSync(STATE_FILE)) {
     console.log('[Antigravity] No background job to cancel.');
     return;
@@ -328,6 +408,9 @@ switch (command) {
   case 'rescue':
     await cmdRescue(args);
     break;
+  case 'transfer':
+    await cmdTransfer(args);
+    break;
   case 'status':
     cmdStatus();
     break;
@@ -345,9 +428,10 @@ switch (command) {
 Antigravity Plugin for Claude Code (CLI Companion)
 
 Commands:
-  review [--base <ref>] [--background]
-  adversarial-review [--base <ref>] [--background] <focus>
-  rescue <task>
+  review [--base <ref>] [--background] [--model <m>] [--effort <e>]
+  adversarial-review [--base <ref>] [--background] [--model <m>] [--effort <e>] <focus>
+  rescue [--model <m>] [--effort <e>] <task>
+  transfer [--model <m>] [--effort <e>] [notes]
   status
   result
   cancel

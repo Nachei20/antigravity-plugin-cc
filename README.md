@@ -20,6 +20,8 @@ This plugin bridges **Anthropic Claude Code** and **Google Antigravity**, elimin
 | `/antigravity:review` | Read-only | Standard principal engineer code review on uncommitted changes or branches. |
 | `/antigravity:adversarial-review` | Read-only | Steerable, skeptical audit challenging architecture, race conditions, and hidden failure modes. |
 | `/antigravity:rescue` | Edit mode | Delegates a difficult bug, failing test, or stuck task to Antigravity (`agy --mode accept-edits`). |
+| `/antigravity:transfer` | Interactive | Transfers the active session and git state to an interactive Antigravity CLI session (`agy -i`). |
+| `antigravity-rescue` | Subagent | Autonomous subagent exposed in Claude Code's `/agents` selector for delegated investigation. |
 | `/antigravity:status` | Utility | Checks the status of background review jobs. |
 | `/antigravity:result` | Utility | Retrieves the output of completed background jobs. |
 | `/antigravity:cancel` | Utility | Cancels an ongoing background job. |
@@ -110,7 +112,34 @@ When Claude Code encounters an elusive bug, recurring test failure, or requires 
 
 ---
 
-### 4. Background Job Management
+### 4. `/antigravity:transfer`
+Handoff your active working context, recent git diffs, and branch state from Claude Code into an **interactive Antigravity CLI session** (`agy -i`).
+
+```bash
+# Transfer current session to interactive Antigravity CLI
+/antigravity:transfer
+
+# Transfer with specific handover notes
+/antigravity:transfer Continuar con la refactorización de la capa de repositorios iniciada en Claude
+```
+
+---
+
+### 5. Advanced Flags (`--model` and `--effort`)
+Every command supports specifying custom models or reasoning effort levels:
+
+* `--effort low|medium|high`: Controls Antigravity's depth of reasoning (defaults to `high`).
+* `--model <model-name>`: Overrides the default model (e.g. `--model gemini-2.5-pro`).
+
+```bash
+/antigravity:review --effort high --model gemini-2.5-pro
+/antigravity:adversarial-review --effort high challenge the authentication flow
+/antigravity:rescue --effort high fix the connection pool leak
+```
+
+---
+
+### 6. Background Job Management
 
 For large reviews that take time:
 

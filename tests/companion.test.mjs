@@ -31,6 +31,9 @@ test('companion prints usage on unknown command or empty arguments', () => {
   assert.match(res.stdout, /review/);
   assert.match(res.stdout, /adversarial-review/);
   assert.match(res.stdout, /rescue/);
+  assert.match(res.stdout, /transfer/);
+  assert.match(res.stdout, /--model/);
+  assert.match(res.stdout, /--effort/);
 });
 
 test('status, result, and cancel handle empty jobs gracefully', () => {
