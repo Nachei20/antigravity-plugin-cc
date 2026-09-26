@@ -7,15 +7,18 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const JOBS_DIR = join(process.cwd(), '.agy-jobs');
 const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 // ponytail: one fixed cap for every job; make it a flag if reviews routinely need longer.
 const PRINT_TIMEOUT = '30m';
+// Backstop in case agy ignores its own --print-timeout.
+const RUNNER_TIMEOUT_MS = 35 * 60 * 1000;
 const EFFORTS = ['low', 'medium', 'high', 'max'];
 
 // --- Helper Functions ---
@@ -77,6 +80,26 @@ export function splitArgs(argv) {
   return argv.length === 1 ? argv[0].split(/\s+/).filter(Boolean) : argv;
 }
 
+const jobFile = (id) => join(JOBS_DIR, `${id}.json`);
+const exitFile = (id) => join(JOBS_DIR, `${id}.exit.json`);
+
+function readExit(id) {
+  return existsSync(exitFile(id)) ? JSON.parse(readFileSync(exitFile(id), 'utf-8')) : null;
+}
+
+/**
+ * The exit record decides whether a job is over: Windows reuses PIDs quickly, so a live PID alone
+ * does not mean the job still runs.
+ */
+function jobState(state) {
+  const exit = readExit(state.id);
+  if (exit?.cancelled) return { done: true, label: 'CANCELLED ⏹' };
+  if (exit) return exit.code === 0 ? { done: true, label: 'COMPLETED ✅' } : { done: true, label: `FAILED ❌ (exit ${exit.code ?? exit.signal ?? exit.error})` };
+  // ponytail: a runner killed without writing its record plus a reused PID still reads as RUNNING; rare, /antigravity:cancel clears it.
+  if (state.pid && isProcessAlive(state.pid)) return { done: false, label: 'RUNNING ⏳' };
+  return { done: true, label: 'ENDED WITHOUT AN EXIT RECORD ⚠️' };
+}
+
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -126,7 +149,17 @@ export function agyArgs({ mode, effort, model = null, addDir = null }) {
  * Starts agy detached and returns at once; /antigravity:status and /antigravity:result follow it up.
  * The prompt goes in on stdin from a file: a diff in argv overflows the Windows command-line limit.
  */
-export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', model = null, addDir = null }) {
+/**
+ * agy's --mode plan is not a read-only guarantee: in a real run it wrote its own plan into the repo.
+ * Reviews inline the diff, so they run in an empty workspace outside the repository instead.
+ */
+function isolatedWorkspace() {
+  return mkdtempSync(join(os.tmpdir(), 'agy-review-'));
+}
+
+const READ_ONLY_RULE = 'Do not create, modify or delete any file, and do not run commands that change state: reply with the review only.';
+
+export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', model = null, addDir = null, cwd }) {
   if (!EFFORTS.includes(effort)) {
     console.error(`Error: --effort must be one of ${EFFORTS.join(', ')} (got "${effort}").`);
     process.exit(1);
@@ -138,30 +171,53 @@ export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high
   const logFile = join(JOBS_DIR, `${id}.log`);
   writeFileSync(promptFile, prompt, 'utf-8');
 
-  const agyPath = getAgyExecutable();
-  const args = agyArgs({ mode, effort, model, addDir });
-  const inFd = openSync(promptFile, 'r');
-  const outFd = openSync(logFile, 'a');
-  let child;
-  try {
-    child = spawn(agyPath, args, { detached: true, stdio: [inFd, outFd, outFd], windowsHide: true });
-  } finally {
-    closeSync(inFd);
-    closeSync(outFd);
-  }
+  const jobMeta = {
+    id,
+    command: commandName,
+    startTime: new Date().toISOString(),
+    agyPath: getAgyExecutable(),
+    args: agyArgs({ mode, effort, model, addDir }),
+    cwd,
+    promptFile,
+    logFile,
+  };
+  writeFileSync(jobFile(id), JSON.stringify(jobMeta, null, 2), 'utf-8');
+
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__run-job', id], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
   if (!child.pid) {
-    console.error(`[Antigravity] Could not start agy (${agyPath}). Run /antigravity:setup.`);
+    console.error('[Antigravity] Could not start the background job runner.');
     process.exit(1);
   }
   child.unref();
 
-  const jobMeta = { id, command: commandName, pid: child.pid, startTime: new Date().toISOString(), args, promptFile, logFile };
+  jobMeta.pid = child.pid;
   writeFileSync(STATE_FILE, JSON.stringify(jobMeta, null, 2), 'utf-8');
 
   console.log(`\n[Antigravity] Started ${commandName} in the background (mode: ${mode}, effort: ${effort}${model ? `, model: ${model}` : ''}).`);
   console.log(`Job ID: ${id} (PID: ${child.pid}, time limit: ${PRINT_TIMEOUT})`);
   console.log('Check progress with: /antigravity:status');
   console.log('Read the answer with: /antigravity:result\n');
+}
+
+/** Detached job body: runs agy with the prompt on stdin and records how it ended. */
+export function runJob(id) {
+  const job = JSON.parse(readFileSync(jobFile(id), 'utf-8'));
+  const inFd = openSync(job.promptFile, 'r');
+  const outFd = openSync(job.logFile, 'a');
+  let res;
+  try {
+    res = spawnSync(job.agyPath, job.args, { cwd: job.cwd, stdio: [inFd, outFd, outFd], windowsHide: true, timeout: RUNNER_TIMEOUT_MS });
+  } finally {
+    closeSync(inFd);
+    closeSync(outFd);
+  }
+  const exit = { code: res.status, signal: res.signal, error: res.error?.code ?? null, endTime: new Date().toISOString() };
+  // Do not overwrite a cancellation recorded while agy was running.
+  if (!readExit(id)) writeFileSync(exitFile(id), JSON.stringify(exit), 'utf-8');
 }
 
 export async function cmdReview(args) {
@@ -190,6 +246,7 @@ export async function cmdReview(args) {
   const prompt = [
     'Act as a Principal Software Engineer and Security Auditor.',
     'Conduct a rigorous, read-only code review on the following git changes.',
+    READ_ONLY_RULE,
     'Inspect for bugs, security vulnerabilities, edge case oversights, regression risks, performance traps, and architectural consistency.',
     'Format your response with:',
     '1. Summary Verdict: (APPROVED | REVISE)',
@@ -205,7 +262,7 @@ export async function cmdReview(args) {
     '```',
   ].join('\n');
 
-  startAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort, model });
+  startAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort, model, cwd: isolatedWorkspace() });
 }
 
 export async function cmdAdversarialReview(args) {
@@ -236,6 +293,7 @@ export async function cmdAdversarialReview(args) {
     'Your goal is to actively challenge the chosen implementation, uncover hidden assumptions, test rollback strategies, detect race conditions, and identify failure modes.',
     `Specific Focus Area: "${focus}"`,
     'Be brutally honest, constructive, and uncompromising on engineering discipline.',
+    READ_ONLY_RULE,
     'Format your response with:',
     '1. Architecture & Design Critique',
     '2. Potential Blind Spots and Hidden Failure Scenarios',
@@ -248,7 +306,7 @@ export async function cmdAdversarialReview(args) {
     diff ? `Diff:\n\`\`\`diff\n${diff.slice(0, 150000)}\n\`\`\`` : '(No diff found; auditing stated architectural focus)',
   ].join('\n');
 
-  startAgyJob({ commandName: 'Adversarial Review', prompt, mode: 'plan', effort, model });
+  startAgyJob({ commandName: 'Adversarial Review', prompt, mode: 'plan', effort, model, cwd: isolatedWorkspace() });
 }
 
 export async function cmdRescue(args) {
@@ -284,7 +342,7 @@ export async function cmdRescue(args) {
     status ? `Current Git Status:\n${status}\n` : '',
   ].join('\n');
 
-  startAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort, model, addDir: process.cwd() });
+  startAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort, model, addDir: process.cwd(), cwd: process.cwd() });
 }
 
 export async function cmdTransfer(args) {
@@ -339,17 +397,17 @@ export function cmdStatus() {
   }
 
   const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-  const alive = state.pid && isProcessAlive(state.pid);
+  const { done, label } = jobState(state);
 
   console.log('\n=== Antigravity Background Job Status ===');
   console.log(`Command:     ${state.command}`);
   console.log(`Job ID:      ${state.id}`);
   console.log(`Process PID: ${state.pid}`);
   console.log(`Started:     ${state.startTime}`);
-  console.log(`State:       ${alive ? 'RUNNING ⏳' : 'COMPLETED ✅'}`);
+  console.log(`State:       ${label}`);
   console.log(`Log file:    ${state.logFile}\n`);
 
-  if (!alive) {
+  if (done) {
     console.log('To view the final result, run: /antigravity:result\n');
   }
 }
@@ -367,11 +425,11 @@ export function cmdResult() {
   }
 
   const content = readFileSync(state.logFile, 'utf-8').trim();
-  const running = state.pid && isProcessAlive(state.pid);
-  console.log(`\n=== Result for ${state.command} (${state.id}) ===\n`);
+  const { done, label } = jobState(state);
+  console.log(`\n=== Result for ${state.command} (${state.id}): ${label} ===\n`);
   if (content) {
     console.log(content);
-  } else if (running) {
+  } else if (!done) {
     console.log('(Still running: no output yet. Check again with /antigravity:status.)');
   } else {
     // Headless agy auto-denies tool use and still exits 0 with no output.
@@ -387,13 +445,15 @@ export function cmdCancel() {
   }
 
   const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-  if (state.pid && isProcessAlive(state.pid)) {
+  if (!jobState(state).done) {
     try {
+      // The runner and agy form one tree (Windows) / one process group (Unix, detached): stop both.
       if (process.platform === 'win32') {
-        spawnSync('taskkill', ['/F', '/PID', state.pid.toString()]);
+        spawnSync('taskkill', ['/F', '/T', '/PID', state.pid.toString()], { timeout: 30_000 });
       } else {
-        process.kill(state.pid, 'SIGTERM');
+        process.kill(-state.pid, 'SIGTERM');
       }
+      writeFileSync(exitFile(state.id), JSON.stringify({ cancelled: true, endTime: new Date().toISOString() }), 'utf-8');
       console.log(`[Antigravity] Successfully cancelled job ${state.id} (PID ${state.pid}).`);
     } catch (e) {
       console.error(`[Antigravity] Failed to terminate process: ${e.message}`);
@@ -432,6 +492,9 @@ switch (command) {
     break;
   case 'setup':
     cmdSetup();
+    break;
+  case '__run-job': // internal: the detached body of every background job
+    runJob(args[0]);
     break;
   default:
     console.log(`

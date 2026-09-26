@@ -83,15 +83,18 @@ test('mock background job state tracking lifecycle', () => {
   const mockLog = join(JOBS_DIR, 'mock-test.log');
   writeFileSync(mockLog, 'Mock review output: VERDICT: APPROVED\nAll checks passed.\n', 'utf-8');
 
+  // The recorded PID is alive (this very process), as when Windows hands a finished job's PID to another
+  // process: the exit record, not the PID, must decide that the job is done.
   const mockState = {
     id: 'job-test-123',
     command: 'Code Review',
-    pid: 9999999, // Unlikely to be alive
+    pid: process.pid,
     startTime: new Date().toISOString(),
     logFile: mockLog,
-    status: 'COMPLETED',
   };
+  const mockExit = join(JOBS_DIR, 'job-test-123.exit.json');
   writeFileSync(STATE_FILE, JSON.stringify(mockState, null, 2), 'utf-8');
+  writeFileSync(mockExit, JSON.stringify({ code: 0, endTime: new Date().toISOString() }), 'utf-8');
 
   try {
     const statusRes = spawnSync('node', [COMPANION_PATH, 'status'], {
@@ -101,6 +104,7 @@ test('mock background job state tracking lifecycle', () => {
     assert.equal(statusRes.status, 0);
     assert.match(statusRes.stdout, /job-test-123/);
     assert.match(statusRes.stdout, /COMPLETED/);
+    assert.doesNotMatch(statusRes.stdout, /RUNNING/);
 
     const resultRes = spawnSync('node', [COMPANION_PATH, 'result'], {
       cwd: ROOT,
@@ -110,6 +114,7 @@ test('mock background job state tracking lifecycle', () => {
     assert.match(resultRes.stdout, /VERDICT: APPROVED/);
   } finally {
     rmSync(mockLog, { force: true });
+    rmSync(mockExit, { force: true });
     rmSync(STATE_FILE, { force: true });
   }
 });
@@ -160,6 +165,7 @@ test('rescue starts a background job with the prompt on stdin, an explicit timeo
     assert.deepEqual(state.args.slice(0, 4), ['--mode', 'accept-edits', '--effort', 'low']);
     assert.ok(state.args.includes('--print-timeout'), 'background jobs need an explicit timeout');
     assert.equal(state.args[state.args.indexOf('--add-dir') + 1], dir);
+    assert.equal(state.cwd, dir, 'rescue must run inside the repository it fixes');
 
     const prompt = readFileSync(state.promptFile, 'utf-8');
     assert.match(prompt, /fix the flaky login test/);
@@ -178,7 +184,11 @@ test('review always runs in the background, read-only', () => {
     const state = readJobState(dir);
     assert.deepEqual(state.args.slice(0, 2), ['--mode', 'plan']);
     assert.ok(!state.args.includes('--add-dir'));
-    assert.match(readFileSync(state.promptFile, 'utf-8'), /app\.js/);
+    // agy's --mode plan has executed its own plan in a real run: reviews get an empty workspace outside the repo.
+    assert.ok(!resolve(state.cwd).startsWith(resolve(dir)), 'a review must not run inside the repository');
+    const prompt = readFileSync(state.promptFile, 'utf-8');
+    assert.match(prompt, /app\.js/);
+    assert.match(prompt, /Do not create, modify or delete any file/);
   } finally {
     cleanup(dir);
   }
@@ -224,6 +234,24 @@ test('result says a finished job with no output is not an approval', () => {
     const res = runCompanion(dir, 'result');
     assert.equal(res.status, 0);
     assert.match(res.stdout, /NOT an approval/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('status reports the exit code once a job fails', () => {
+  const dir = tempProject();
+  try {
+    assert.equal(runCompanion(dir, 'rescue', 'fix it').status, 0);
+    const exitFile = join(dir, '.agy-jobs', `${readJobState(dir).id}.exit.json`);
+    for (let i = 0; i < 100 && !existsSync(exitFile); i++) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    assert.ok(existsSync(exitFile), 'the job runner must write an exit record');
+
+    const res = runCompanion(dir, 'status');
+    assert.match(res.stdout, /FAILED/);
+    assert.match(res.stdout, /exit 9/); // node rejects agy's flags with exit code 9
   } finally {
     cleanup(dir);
   }
