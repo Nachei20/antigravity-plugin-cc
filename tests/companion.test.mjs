@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -110,5 +111,120 @@ test('mock background job state tracking lifecycle', () => {
   } finally {
     rmSync(mockLog, { force: true });
     rmSync(STATE_FILE, { force: true });
+  }
+});
+
+// --- Background jobs, transfer and results (a stand-in "agy": node itself rejects the flags and exits) ---
+
+function tempProject(withGit = false) {
+  const dir = mkdtempSync(join(os.tmpdir(), 'agy-companion-'));
+  if (withGit) {
+    spawnSync('git', ['init', '-q'], { cwd: dir });
+    writeFileSync(join(dir, 'app.js'), 'console.log(1);\n', 'utf-8');
+  }
+  return dir;
+}
+
+// `!` command injection passes "$ARGUMENTS" as a single string, so every call below does the same.
+function runCompanion(cwd, command, rawArgs) {
+  const argv = [COMPANION_PATH, command];
+  if (rawArgs !== undefined) argv.push(rawArgs);
+  return spawnSync('node', argv, { cwd, encoding: 'utf-8', env: { ...process.env, AGY_BIN_PATH: process.execPath } });
+}
+
+function readJobState(cwd) {
+  return JSON.parse(readFileSync(join(cwd, '.agy-jobs', 'last-job.json'), 'utf-8'));
+}
+
+// The detached job ran with the temp dir as cwd; Windows keeps that dir locked for a moment after the process exits.
+function cleanup(dir) {
+  for (let i = 0; ; i++) {
+    try {
+      return rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      if (!['EBUSY', 'EPERM'].includes(e.code) || i >= 50) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+  }
+}
+
+test('rescue starts a background job with the prompt on stdin, an explicit timeout and the repo as workspace', () => {
+  const dir = tempProject();
+  try {
+    const res = runCompanion(dir, 'rescue', '--effort low fix the flaky login test');
+    assert.equal(res.status, 0, res.stderr || res.stdout);
+    assert.match(res.stdout, /Job ID: job-\d+/);
+
+    const state = readJobState(dir);
+    assert.ok(!state.args.includes('-p'), 'the prompt must not travel in argv (Windows command-line limit)');
+    assert.deepEqual(state.args.slice(0, 4), ['--mode', 'accept-edits', '--effort', 'low']);
+    assert.ok(state.args.includes('--print-timeout'), 'background jobs need an explicit timeout');
+    assert.equal(state.args[state.args.indexOf('--add-dir') + 1], dir);
+
+    const prompt = readFileSync(state.promptFile, 'utf-8');
+    assert.match(prompt, /fix the flaky login test/);
+    assert.ok(prompt.includes(dir), 'rescue prompt must name the absolute repository path');
+    assert.equal(readFileSync(join(dir, '.agy-jobs', '.gitignore'), 'utf-8').trim(), '*');
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('review always runs in the background, read-only', () => {
+  const dir = tempProject(true);
+  try {
+    const res = runCompanion(dir, 'review', '');
+    assert.equal(res.status, 0, res.stderr || res.stdout);
+    const state = readJobState(dir);
+    assert.deepEqual(state.args.slice(0, 2), ['--mode', 'plan']);
+    assert.ok(!state.args.includes('--add-dir'));
+    assert.match(readFileSync(state.promptFile, 'utf-8'), /app\.js/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('an invalid --effort is rejected before any job starts', () => {
+  const dir = tempProject();
+  try {
+    const res = runCompanion(dir, 'rescue', '--effort extreme fix it');
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /--effort/);
+    assert.ok(!existsSync(join(dir, '.agy-jobs', 'last-job.json')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('transfer writes a handoff file and prints the agy -i command instead of launching it', () => {
+  const dir = tempProject();
+  try {
+    const res = runCompanion(dir, 'transfer', '--model gemini-test keep going with the parser');
+    assert.equal(res.status, 0, res.stderr || res.stdout);
+    assert.match(res.stdout, /agy -i /);
+    assert.match(res.stdout, /--model gemini-test/);
+    const handoff = res.stdout.match(/(\S+transfer-\d+\.md)/)[1];
+    assert.match(readFileSync(handoff, 'utf-8'), /keep going with the parser/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('result says a finished job with no output is not an approval', () => {
+  const dir = tempProject();
+  try {
+    mkdirSync(join(dir, '.agy-jobs'));
+    const logFile = join(dir, '.agy-jobs', 'job-1.log');
+    writeFileSync(logFile, '', 'utf-8');
+    writeFileSync(
+      join(dir, '.agy-jobs', 'last-job.json'),
+      JSON.stringify({ id: 'job-1', command: 'Code Review', pid: 9999999, startTime: new Date().toISOString(), logFile }),
+      'utf-8'
+    );
+    const res = runCompanion(dir, 'result');
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /NOT an approval/);
+  } finally {
+    cleanup(dir);
   }
 });
