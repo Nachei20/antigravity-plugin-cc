@@ -7,7 +7,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
@@ -218,6 +218,13 @@ export function runJob(id) {
   const exit = { code: res.status, signal: res.signal, error: res.error?.code ?? null, endTime: new Date().toISOString() };
   // Do not overwrite a cancellation recorded while agy was running.
   if (!readExit(id)) writeFileSync(exitFile(id), JSON.stringify(exit), 'utf-8');
+
+  // A review's isolated workspace goes away when empty; if agy wrote into it, keep it for inspection.
+  if (job.cwd !== process.cwd()) {
+    try {
+      rmdirSync(job.cwd);
+    } catch {}
+  }
 }
 
 export async function cmdReview(args) {

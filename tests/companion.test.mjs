@@ -189,6 +189,11 @@ test('review always runs in the background, read-only', () => {
     const prompt = readFileSync(state.promptFile, 'utf-8');
     assert.match(prompt, /app\.js/);
     assert.match(prompt, /Do not create, modify or delete any file/);
+
+    for (let i = 0; i < 100 && existsSync(state.cwd); i++) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    assert.ok(!existsSync(state.cwd), 'an empty review workspace must be removed when the job ends');
   } finally {
     cleanup(dir);
   }
