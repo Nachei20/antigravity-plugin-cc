@@ -26,46 +26,28 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
 
   const plugin = JSON.parse(readFileSync(pluginPath, 'utf-8'));
   assert.equal(plugin.name, 'antigravity');
-  assert.ok(plugin.commands, 'plugin must define commands');
+  assert.equal(typeof plugin.author?.name, 'string', 'author must be an object with a name');
 
-  // Verify each command target file exists
-  for (const [cmdName, cmdRelPath] of Object.entries(plugin.commands)) {
-    const fullCmdPath = join(PLUGIN_DIR, cmdRelPath);
-    assert.ok(
-      existsSync(fullCmdPath),
-      `Command '${cmdName}' points to non-existent file: ${cmdRelPath}`
-    );
+  // Claude Code auto-discovers commands/, agents/, skills/ and hooks/hooks.json; name->file maps are not valid manifest values.
+  for (const key of ['commands', 'agents', 'skills', 'hooks']) {
+    assert.equal(plugin[key], undefined, `plugin.json must not declare '${key}': rely on the default ${key}/ directory`);
   }
 
-  assert.ok(plugin.commands.transfer, 'plugin must include transfer command');
-  assert.ok(plugin.agents, 'plugin must define agents');
-
-  for (const [agentName, agentRelPath] of Object.entries(plugin.agents)) {
-    const fullAgentPath = join(PLUGIN_DIR, agentRelPath);
-    assert.ok(
-      existsSync(fullAgentPath),
-      `Agent '${agentName}' points to non-existent file: ${agentRelPath}`
-    );
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'loop']) {
+    assert.ok(existsSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`)), `missing commands/${cmd}.md`);
   }
+  assert.ok(existsSync(join(PLUGIN_DIR, 'agents', 'antigravity-rescue.md')), 'missing agents/antigravity-rescue.md');
+  assert.ok(existsSync(join(PLUGIN_DIR, 'skills', 'antigravity-code-review', 'SKILL.md')), 'missing skills/antigravity-code-review/SKILL.md');
 
-  // Verify hooks declaration and targets
-  assert.ok(plugin.hooks, 'plugin must define hooks file');
-  const fullHooksPath = join(PLUGIN_DIR, plugin.hooks);
-  assert.ok(existsSync(fullHooksPath), `Hooks file does not exist: ${plugin.hooks}`);
-  const hooksData = JSON.parse(readFileSync(fullHooksPath, 'utf-8'));
+  // The loop lives only in the claudegravity-loop plugin; /antigravity:loop must delegate, not bundle a copy.
+  assert.ok(!existsSync(join(PLUGIN_DIR, 'skills', 'claudegravity-loop')), 'skills/claudegravity-loop must not be bundled');
+  const loopCmd = readFileSync(join(PLUGIN_DIR, 'commands', 'loop.md'), 'utf-8');
+  assert.ok(loopCmd.includes('claudegravity-loop:claudegravity-loop'), 'commands/loop.md must delegate to the claudegravity-loop plugin skill');
+
+  const hooksData = JSON.parse(readFileSync(join(PLUGIN_DIR, 'hooks', 'hooks.json'), 'utf-8'));
   assert.ok(hooksData.hooks, 'hooks.json must contain hooks object');
   assert.ok(hooksData.hooks.SessionStart, 'hooks must define SessionStart');
   assert.ok(hooksData.hooks.SessionEnd, 'hooks must define SessionEnd');
-
-  // Verify skills declaration and targets
-  assert.ok(plugin.skills, 'plugin must define skills');
-  for (const [skillName, skillRelPath] of Object.entries(plugin.skills)) {
-    const fullSkillPath = join(PLUGIN_DIR, skillRelPath);
-    assert.ok(
-      existsSync(fullSkillPath),
-      `Skill '${skillName}' points to non-existent file: ${skillRelPath}`
-    );
-  }
 });
 
 test('.claude-plugin/marketplace.json is valid', () => {
@@ -74,6 +56,7 @@ test('.claude-plugin/marketplace.json is valid', () => {
 
   const mkt = JSON.parse(readFileSync(mktPath, 'utf-8'));
   assert.equal(mkt.name, 'antigravity');
+  assert.equal(typeof mkt.owner?.name, 'string', 'marketplace must declare owner.name');
   assert.ok(Array.isArray(mkt.plugins), 'marketplace must have plugins array');
   assert.ok(mkt.plugins.length > 0, 'marketplace must declare at least one plugin');
   assert.equal(mkt.plugins[0].name, 'antigravity');

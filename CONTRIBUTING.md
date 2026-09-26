@@ -40,26 +40,31 @@ Thank you for your interest in contributing to `antigravity-plugin-cc`! We welco
 ```text
 antigravity-plugin-cc/
 ├── .claude-plugin/
-│   ├── plugin.json         # Manifest declaring commands and subagents
-│   └── marketplace.json    # Marketplace catalog distribution metadata
-├── bin/
-│   └── agy-companion.mjs   # Core Node.js runner orchestrating git diff and agy CLI
-├── commands/               # Slash command markdown definitions (/antigravity:*)
-├── agents/                 # Autonomous subagents (/agents)
-├── tests/                  # Automated integration tests
-└── README.md               # Main documentation
+│   └── marketplace.json          # Marketplace catalog (owner + plugin list)
+├── plugins/antigravity/          # The plugin itself
+│   ├── .claude-plugin/plugin.json  # Metadata only: name, version, author, license
+│   ├── commands/                 # Slash commands (/antigravity:*), auto-discovered
+│   ├── agents/                   # Subagents, auto-discovered
+│   ├── skills/<name>/SKILL.md    # Skills, auto-discovered
+│   ├── hooks/hooks.json          # Lifecycle hooks, auto-discovered
+│   ├── scripts/lifecycle.mjs     # Hook entry point
+│   └── bin/agy-companion.mjs     # Node.js runner orchestrating git diff and agy CLI
+├── bin/agy-companion.mjs         # npm `bin` entry
+├── scripts/                      # Test runner and version sync
+├── tests/                        # Automated integration tests
+└── README.md                     # Main documentation
 ```
 
 ---
 
 ## Adding a New Command
 
-1. Create a new command definition under `commands/<your-command>.md`.
-2. Register the command in `.claude-plugin/plugin.json` under `"commands"`.
-3. Add any underlying CLI routing logic to `bin/agy-companion.mjs`.
+1. Create a new command definition under `plugins/antigravity/commands/<your-command>.md`.
+2. Do **not** register it in `plugin.json`: Claude Code discovers `commands/`, `agents/`, `skills/` and `hooks/hooks.json` on its own, and a `"commands"` name→file map fails `claude plugin validate`.
+3. Add any underlying CLI routing logic to `plugins/antigravity/bin/agy-companion.mjs`.
 4. Document the command in `README.md`.
-5. Add test coverage in `tests/manifests.test.mjs` and `tests/companion.test.mjs`.
-6. Run `npm test` to ensure all checks pass.
+5. Add the command name to the list in `tests/manifests.test.mjs`, plus coverage in `tests/companion.test.mjs`.
+6. Run `npm test` and `claude plugin validate .` to ensure all checks pass.
 
 ---
 

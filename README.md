@@ -55,14 +55,16 @@ Add this repository to your Claude Code marketplace:
 
 ### Method B: Local Development / Direct Linking
 
-From the root of your project or Claude Code configuration:
+From a local clone of this repository:
 
 ```bash
-# Link local plugin folder
-/plugin install ./path/to/IA_SKILLS
-
-# Verify installation
+# Register the local clone as a marketplace, then install from it
+/plugin marketplace add ./path/to/antigravity-plugin-cc
+/plugin install antigravity@antigravity
 /antigravity:setup
+
+# Or load it for a single session without installing
+claude --plugin-dir ./path/to/antigravity-plugin-cc/plugins/antigravity
 ```
 
 ---

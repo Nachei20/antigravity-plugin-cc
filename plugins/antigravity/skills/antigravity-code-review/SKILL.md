@@ -1,5 +1,5 @@
 ---
-name: antigravity-review
+name: antigravity-code-review
 description: "Guidelines and reasoning patterns for cross-model code reviews, adversarial stress-tests, and rescue operations using Google Antigravity."
 ---
 
