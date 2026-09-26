@@ -36,7 +36,9 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
   for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'loop']) {
     assert.ok(existsSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`)), `missing commands/${cmd}.md`);
   }
-  assert.ok(existsSync(join(PLUGIN_DIR, 'agents', 'antigravity-rescue.md')), 'missing agents/antigravity-rescue.md');
+  // A subagent cannot reach the companion: it has no `!` injection and CLAUDE_PLUGIN_ROOT is unset in its Bash tool.
+  // /antigravity:rescue covers delegation, so the plugin ships no agents.
+  assert.ok(!existsSync(join(PLUGIN_DIR, 'agents')), 'plugins/antigravity must not ship agents/');
   assert.ok(existsSync(join(PLUGIN_DIR, 'skills', 'antigravity-code-review', 'SKILL.md')), 'missing skills/antigravity-code-review/SKILL.md');
 
   // The loop lives only in the claudegravity-loop plugin; /antigravity:loop must delegate, not bundle a copy.

@@ -44,7 +44,6 @@ antigravity-plugin-cc/
 ├── plugins/antigravity/          # The plugin itself
 │   ├── .claude-plugin/plugin.json  # Metadata only: name, version, author, license
 │   ├── commands/                 # Slash commands (/antigravity:*), auto-discovered
-│   ├── agents/                   # Subagents, auto-discovered
 │   ├── skills/<name>/SKILL.md    # Skills, auto-discovered
 │   ├── hooks/hooks.json          # Lifecycle hooks, auto-discovered
 │   ├── scripts/lifecycle.mjs     # Hook entry point

@@ -21,7 +21,6 @@ This plugin bridges **Anthropic Claude Code** and **Google Antigravity**, elimin
 | `/antigravity:adversarial-review` | Read-only · background | Steerable, skeptical audit challenging architecture, race conditions, and hidden failure modes. |
 | `/antigravity:rescue` | Edit mode · background | Delegates a difficult bug, failing test, or stuck task to Antigravity (`agy --mode accept-edits`), which edits this repository. |
 | `/antigravity:transfer` | Handoff | Writes the git state and your notes to a handoff file and prints the `agy -i` command to continue in your own terminal. |
-| `antigravity-rescue` | Subagent | Autonomous subagent exposed in Claude Code's `/agents` selector for delegated investigation. |
 | `/antigravity:status` | Utility | Checks the status of background review jobs. |
 | `/antigravity:result` | Utility | Retrieves the output of completed background jobs. |
 | `/antigravity:cancel` | Utility | Cancels an ongoing background job. |
