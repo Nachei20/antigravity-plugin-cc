@@ -50,6 +50,19 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
   assert.ok(hooksData.hooks.SessionEnd, 'hooks must define SessionEnd');
 });
 
+test('companion commands run through `!` injection so ${CLAUDE_PLUGIN_ROOT} resolves', () => {
+  // A fenced bash block is run by the model through the Bash tool, where CLAUDE_PLUGIN_ROOT is not set.
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup']) {
+    const body = readFileSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`), 'utf-8');
+    assert.ok(
+      body.includes('!`node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" ' + cmd),
+      `commands/${cmd}.md must inject the companion call with !\`...\``
+    );
+    assert.match(body, /^allowed-tools: Bash\(node:\*\)$/m, `commands/${cmd}.md must allow Bash(node:*)`);
+    assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `commands/${cmd}.md must not fall back to the current directory`);
+  }
+});
+
 test('.claude-plugin/marketplace.json is valid', () => {
   const mktPath = join(ROOT, '.claude-plugin', 'marketplace.json');
   assert.ok(existsSync(mktPath), 'marketplace.json must exist');
