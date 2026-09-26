@@ -48,8 +48,7 @@ antigravity-plugin-cc/
 │   ├── skills/<name>/SKILL.md    # Skills, auto-discovered
 │   ├── hooks/hooks.json          # Lifecycle hooks, auto-discovered
 │   ├── scripts/lifecycle.mjs     # Hook entry point
-│   └── bin/agy-companion.mjs     # Node.js runner orchestrating git diff and agy CLI
-├── bin/agy-companion.mjs         # npm `bin` entry
+│   └── bin/agy-companion.mjs     # Node.js runner (git diff + agy CLI); also the npm `bin` entry
 ├── scripts/                      # Test runner and version sync
 ├── tests/                        # Automated integration tests
 └── README.md                     # Main documentation

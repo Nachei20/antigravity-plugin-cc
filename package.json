@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "Google Antigravity plugin for Claude Code: cross-model code review, adversarial design stress-tests, and task rescue delegation.",
   "type": "module",
-  "main": "bin/agy-companion.mjs",
+  "main": "plugins/antigravity/bin/agy-companion.mjs",
   "bin": {
-    "antigravity-companion": "bin/agy-companion.mjs"
+    "antigravity-companion": "plugins/antigravity/bin/agy-companion.mjs"
   },
   "scripts": {
     "test": "node scripts/test.mjs",
-    "test:setup": "node bin/agy-companion.mjs setup",
+    "test:setup": "node plugins/antigravity/bin/agy-companion.mjs setup",
     "check-version": "node scripts/bump-version.mjs --check",
     "bump-version": "node scripts/bump-version.mjs"
   },

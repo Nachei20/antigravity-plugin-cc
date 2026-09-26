@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const COMPANION_PATH = join(ROOT, 'bin', 'agy-companion.mjs');
+const COMPANION_PATH = join(ROOT, 'plugins', 'antigravity', 'bin', 'agy-companion.mjs');
 const JOBS_DIR = join(ROOT, '.agy-jobs');
 const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 
