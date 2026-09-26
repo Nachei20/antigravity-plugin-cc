@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,7 +122,8 @@ test('mock background job state tracking lifecycle', () => {
 // --- Background jobs, transfer and results (a stand-in "agy": node itself rejects the flags and exits) ---
 
 function tempProject(withGit = false) {
-  const dir = mkdtempSync(join(os.tmpdir(), 'agy-companion-'));
+  // realpath: on macOS the temp dir is a symlink (/var -> /private/var) and the companion sees the resolved cwd.
+  const dir = realpathSync(mkdtempSync(join(os.tmpdir(), 'agy-companion-')));
   if (withGit) {
     spawnSync('git', ['init', '-q'], { cwd: dir });
     writeFileSync(join(dir, 'app.js'), 'console.log(1);\n', 'utf-8');
