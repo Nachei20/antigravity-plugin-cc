@@ -2,25 +2,8 @@
   "name": "antigravity",
   "version": "1.0.0",
   "description": "Google Antigravity plugin for Claude Code: cross-model code review, adversarial design stress-tests, and task rescue delegation.",
-  "author": "Nacho",
-  "license": "Apache-2.0",
-  "hooks": "./hooks/hooks.json",
-  "commands": {
-    "review": "./commands/review.md",
-    "adversarial-review": "./commands/adversarial-review.md",
-    "rescue": "./commands/rescue.md",
-    "transfer": "./commands/transfer.md",
-    "status": "./commands/status.md",
-    "result": "./commands/result.md",
-    "cancel": "./commands/cancel.md",
-    "setup": "./commands/setup.md",
-    "loop": "./commands/loop.md"
+  "author": {
+    "name": "Nacho"
   },
-  "agents": {
-    "antigravity-rescue": "./agents/antigravity-rescue.md"
-  },
-  "skills": {
-    "antigravity-review": "./skills/antigravity-review/SKILL.md",
-    "claudegravity-loop": "./skills/claudegravity-loop/SKILL.md"
-  }
+  "license": "Apache-2.0"
 }

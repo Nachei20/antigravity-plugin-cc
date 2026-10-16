@@ -1,14 +1,9 @@
 ---
-description: Run a read-only code review using Google Antigravity
-arguments:
-  - name: flags
-    description: Optional flags like --base <ref> or --background
+description: Run a read-only code review of your git changes with Google Antigravity (background job)
+argument-hint: '[--base <ref>] [--model <model>] [--effort <low|medium|high|max>]'
+allowed-tools: Bash(node:*)
 ---
 
-Execute the Antigravity code review companion:
+!`node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" review "$ARGUMENTS"`
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT:-.}/bin/agy-companion.mjs" review $ARGUMENTS
-```
-
-Review results and verdicts (APPROVED / REVISE) will be displayed directly from Antigravity.
+Show the output above to the user as is. It runs as a background job: do not wait for it. Point the user to `/antigravity:status` and `/antigravity:result`. This command is review-only: do not fix anything.

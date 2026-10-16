@@ -17,11 +17,11 @@ This plugin bridges **Anthropic Claude Code** and **Google Antigravity**, elimin
 
 | Command | Type | Description |
 | :--- | :--- | :--- |
-| `/antigravity:review` | Read-only | Standard principal engineer code review on uncommitted changes or branches. |
-| `/antigravity:adversarial-review` | Read-only | Steerable, skeptical audit challenging architecture, race conditions, and hidden failure modes. |
-| `/antigravity:rescue` | Edit mode | Delegates a difficult bug, failing test, or stuck task to Antigravity (`agy --mode accept-edits`). |
-| `/antigravity:transfer` | Interactive | Transfers the active session and git state to an interactive Antigravity CLI session (`agy -i`). |
-| `antigravity-rescue` | Subagent | Autonomous subagent exposed in Claude Code's `/agents` selector for delegated investigation. |
+| `/antigravity:review` | Read-only · background | Standard principal engineer code review on uncommitted changes or branches. |
+| `/antigravity:adversarial-review` | Read-only · background | Steerable, skeptical audit challenging architecture, race conditions, and hidden failure modes. |
+| `/antigravity:rescue` | Edit mode · background | Delegates a difficult bug, failing test, or stuck task to Antigravity (`agy --mode accept-edits`), which edits this repository. |
+| `/antigravity:transfer` | Handoff | Writes the git state and your notes to a handoff file and prints the `agy -i` command to continue in your own terminal. |
+| `agy-gemini-flash`, `agy-gemini-argon`, `agy-claude-sonnet`, `agy-claude-opus`, `agy-gpt-oss` | Subagents · edit mode | One per Antigravity model: hand a task to that model (`rescue --wait --model <slug>`) and check the result with `git status`/`git diff` instead of trusting agy's SUCCESS. |
 | `/antigravity:status` | Utility | Checks the status of background review jobs. |
 | `/antigravity:result` | Utility | Retrieves the output of completed background jobs. |
 | `/antigravity:cancel` | Utility | Cancels an ongoing background job. |
@@ -55,14 +55,16 @@ Add this repository to your Claude Code marketplace:
 
 ### Method B: Local Development / Direct Linking
 
-From the root of your project or Claude Code configuration:
+From a local clone of this repository:
 
 ```bash
-# Link local plugin folder
-/plugin install ./path/to/IA_SKILLS
-
-# Verify installation
+# Register the local clone as a marketplace, then install from it
+/plugin marketplace add ./path/to/antigravity-plugin-cc
+/plugin install antigravity@antigravity
 /antigravity:setup
+
+# Or load it for a single session without installing
+claude --plugin-dir ./path/to/antigravity-plugin-cc/plugins/antigravity
 ```
 
 ---
@@ -79,8 +81,7 @@ Runs a read-only code review on your current work. Antigravity analyzes the git 
 # Review current branch against main
 /antigravity:review --base main
 
-# Run in the background for large multi-file diffs
-/antigravity:review --background
+# Every review runs as a background job; follow it up with:
 /antigravity:status
 /antigravity:result
 ```
@@ -104,7 +105,7 @@ Runs a **steerable, skeptical challenge review**. It actively questions assumpti
 ---
 
 ### 3. `/antigravity:rescue`
-When Claude Code encounters an elusive bug, recurring test failure, or requires a fresh perspective, `/antigravity:rescue` transfers the problem to Antigravity. Antigravity operates with active edits enabled (`--mode accept-edits`) to investigate and apply the fix.
+When Claude Code encounters an elusive bug, recurring test failure, or requires a fresh perspective, `/antigravity:rescue` transfers the problem to Antigravity. Antigravity runs in the background with active edits enabled (`--mode accept-edits`) inside this repository, so leave the working tree alone until `/antigravity:result` shows the job finished, then review `git diff`.
 
 ```bash
 /antigravity:rescue El test de integración en auth.test.ts falla intermitentemente por timeout al levantar el contenedor de Postgres
@@ -113,7 +114,7 @@ When Claude Code encounters an elusive bug, recurring test failure, or requires 
 ---
 
 ### 4. `/antigravity:transfer`
-Handoff your active working context, recent git diffs, and branch state from Claude Code into an **interactive Antigravity CLI session** (`agy -i`).
+Hand off your recent git diffs, branch state and notes from Claude Code to an **interactive Antigravity CLI session**. An interactive session cannot run inside Claude Code, so the command writes a handoff file under `.agy-jobs/` and prints the `agy -i` command to run in your own terminal.
 
 ```bash
 # Transfer current session to interactive Antigravity CLI
@@ -128,11 +129,12 @@ Handoff your active working context, recent git diffs, and branch state from Cla
 ### 5. Advanced Flags (`--model` and `--effort`)
 Every command supports specifying custom models or reasoning effort levels:
 
-* `--effort low|medium|high`: Controls Antigravity's depth of reasoning (defaults to `high`).
-* `--model <model-name>`: Overrides the default model (e.g. `--model gemini-2.5-pro`).
+* `--effort low|medium|high|xhigh|max`: Controls Antigravity's depth of reasoning (defaults to `high` when no `--model` is given).
+* `--model <slug>`: A slug from `agy models` (e.g. `--model gemini-4-argon-high`). Slugs carry their effort, and agy rejects an `--effort` that disagrees, so with `--model` leave `--effort` out.
+* `--wait` (review, rescue): run in the foreground and print the result instead of starting a background job.
 
 ```bash
-/antigravity:review --effort high --model gemini-2.5-pro
+/antigravity:review --model gemini-4-argon-high
 /antigravity:adversarial-review --effort high challenge the authentication flow
 /antigravity:rescue --effort high fix the connection pool leak
 ```
@@ -141,11 +143,11 @@ Every command supports specifying custom models or reasoning effort levels:
 
 ### 6. Background Job Management
 
-For large reviews that take time:
+Reviews and rescues always run in the background: the command returns at once with a job ID. Each job has a 30-minute time limit, and its prompt and log live in `.agy-jobs/` (which ignores itself in git).
 
 ```bash
-# Start in background
-/antigravity:review --background
+# Start a job
+/antigravity:review
 
 # Check status
 /antigravity:status

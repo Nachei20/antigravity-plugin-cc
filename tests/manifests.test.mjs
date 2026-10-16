@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,45 +26,54 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
 
   const plugin = JSON.parse(readFileSync(pluginPath, 'utf-8'));
   assert.equal(plugin.name, 'antigravity');
-  assert.ok(plugin.commands, 'plugin must define commands');
+  assert.equal(typeof plugin.author?.name, 'string', 'author must be an object with a name');
 
-  // Verify each command target file exists
-  for (const [cmdName, cmdRelPath] of Object.entries(plugin.commands)) {
-    const fullCmdPath = join(PLUGIN_DIR, cmdRelPath);
-    assert.ok(
-      existsSync(fullCmdPath),
-      `Command '${cmdName}' points to non-existent file: ${cmdRelPath}`
-    );
+  // Claude Code auto-discovers commands/, agents/, skills/ and hooks/hooks.json; name->file maps are not valid manifest values.
+  for (const key of ['commands', 'agents', 'skills', 'hooks']) {
+    assert.equal(plugin[key], undefined, `plugin.json must not declare '${key}': rely on the default ${key}/ directory`);
   }
 
-  assert.ok(plugin.commands.transfer, 'plugin must include transfer command');
-  assert.ok(plugin.agents, 'plugin must define agents');
-
-  for (const [agentName, agentRelPath] of Object.entries(plugin.agents)) {
-    const fullAgentPath = join(PLUGIN_DIR, agentRelPath);
-    assert.ok(
-      existsSync(fullAgentPath),
-      `Agent '${agentName}' points to non-existent file: ${agentRelPath}`
-    );
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'loop']) {
+    assert.ok(existsSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`)), `missing commands/${cmd}.md`);
   }
+  // One subagent per agy model. CLAUDE_PLUGIN_ROOT is unset in a subagent's Bash tool, but Claude Code substitutes the
+  // literal ${CLAUDE_PLUGIN_ROOT} in agent bodies; the `${CLAUDE_PLUGIN_ROOT:-.}` shell form is not substituted.
+  const agents = readdirSync(join(PLUGIN_DIR, 'agents'));
+  assert.ok(agents.length >= 1, 'plugins/antigravity must ship its agy-* subagents');
+  for (const file of agents) {
+    const body = readFileSync(join(PLUGIN_DIR, 'agents', file), 'utf-8');
+    const name = file.replace(/\.md$/, '');
+    assert.match(name, /^agy-/, `${file}: subagents are named agy-<alias>`);
+    assert.match(body, new RegExp(`^name: ${name}$`, 'm'), `${file}: name must match the file name`);
+    const command = body.match(/```bash\r?\n([\s\S]*?)```/)?.[1] ?? '';
+    assert.ok(command.includes('node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" rescue --wait --model '), `${file}: must call the companion synchronously with a fixed model`);
+    assert.doesNotMatch(command, /dangerously|yolo|bypass|--effort/, `${file}: no permission bypass, and no --effort next to a model slug`);
+    assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `${file}: must not use the unsubstituted shell fallback`);
+    assert.doesNotMatch(body, /^permissionMode:/m, `${file}: must not set a permission mode`);
+  }
+  assert.ok(existsSync(join(PLUGIN_DIR, 'skills', 'antigravity-code-review', 'SKILL.md')), 'missing skills/antigravity-code-review/SKILL.md');
 
-  // Verify hooks declaration and targets
-  assert.ok(plugin.hooks, 'plugin must define hooks file');
-  const fullHooksPath = join(PLUGIN_DIR, plugin.hooks);
-  assert.ok(existsSync(fullHooksPath), `Hooks file does not exist: ${plugin.hooks}`);
-  const hooksData = JSON.parse(readFileSync(fullHooksPath, 'utf-8'));
+  // The loop lives only in the claudegravity-loop plugin; /antigravity:loop must delegate, not bundle a copy.
+  assert.ok(!existsSync(join(PLUGIN_DIR, 'skills', 'claudegravity-loop')), 'skills/claudegravity-loop must not be bundled');
+  const loopCmd = readFileSync(join(PLUGIN_DIR, 'commands', 'loop.md'), 'utf-8');
+  assert.ok(loopCmd.includes('claudegravity-loop:claudegravity-loop'), 'commands/loop.md must delegate to the claudegravity-loop plugin skill');
+
+  const hooksData = JSON.parse(readFileSync(join(PLUGIN_DIR, 'hooks', 'hooks.json'), 'utf-8'));
   assert.ok(hooksData.hooks, 'hooks.json must contain hooks object');
   assert.ok(hooksData.hooks.SessionStart, 'hooks must define SessionStart');
   assert.ok(hooksData.hooks.SessionEnd, 'hooks must define SessionEnd');
+});
 
-  // Verify skills declaration and targets
-  assert.ok(plugin.skills, 'plugin must define skills');
-  for (const [skillName, skillRelPath] of Object.entries(plugin.skills)) {
-    const fullSkillPath = join(PLUGIN_DIR, skillRelPath);
+test('companion commands run through `!` injection so ${CLAUDE_PLUGIN_ROOT} resolves', () => {
+  // A fenced bash block is run by the model through the Bash tool, where CLAUDE_PLUGIN_ROOT is not set.
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup']) {
+    const body = readFileSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`), 'utf-8');
     assert.ok(
-      existsSync(fullSkillPath),
-      `Skill '${skillName}' points to non-existent file: ${skillRelPath}`
+      body.includes('!`node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" ' + cmd),
+      `commands/${cmd}.md must inject the companion call with !\`...\``
     );
+    assert.match(body, /^allowed-tools: Bash\(node:\*\)$/m, `commands/${cmd}.md must allow Bash(node:*)`);
+    assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `commands/${cmd}.md must not fall back to the current directory`);
   }
 });
 
@@ -74,6 +83,7 @@ test('.claude-plugin/marketplace.json is valid', () => {
 
   const mkt = JSON.parse(readFileSync(mktPath, 'utf-8'));
   assert.equal(mkt.name, 'antigravity');
+  assert.equal(typeof mkt.owner?.name, 'string', 'marketplace must declare owner.name');
   assert.ok(Array.isArray(mkt.plugins), 'marketplace must have plugins array');
   assert.ok(mkt.plugins.length > 0, 'marketplace must declare at least one plugin');
   assert.equal(mkt.plugins[0].name, 'antigravity');

@@ -14,5 +14,5 @@ Closes #(issue-number)
 - [ ] My code follows the code style of this project.
 - [ ] I have run `npm test` locally and all tests pass (0 failures).
 - [ ] I have updated the `README.md` if introducing new commands or flags.
-- [ ] Any new commands are registered in `.claude-plugin/plugin.json`.
+- [ ] `claude plugin validate .` passes (new commands, agents and skills go in their default folders under `plugins/antigravity/`, not in `plugin.json`).
 - [ ] I have added corresponding tests in `tests/` for my changes.

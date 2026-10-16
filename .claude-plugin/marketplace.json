@@ -1,5 +1,9 @@
 {
   "name": "antigravity",
+  "description": "Google Antigravity (Gemini) inside Claude Code: cross-model code review, adversarial design stress-tests, and rescue task delegation.",
+  "owner": {
+    "name": "Nacho"
+  },
   "plugins": [
     {
       "name": "antigravity",
