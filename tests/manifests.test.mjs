@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,9 +36,21 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
   for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'loop']) {
     assert.ok(existsSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`)), `missing commands/${cmd}.md`);
   }
-  // A subagent cannot reach the companion: it has no `!` injection and CLAUDE_PLUGIN_ROOT is unset in its Bash tool.
-  // /antigravity:rescue covers delegation, so the plugin ships no agents.
-  assert.ok(!existsSync(join(PLUGIN_DIR, 'agents')), 'plugins/antigravity must not ship agents/');
+  // One subagent per agy model. CLAUDE_PLUGIN_ROOT is unset in a subagent's Bash tool, but Claude Code substitutes the
+  // literal ${CLAUDE_PLUGIN_ROOT} in agent bodies; the `${CLAUDE_PLUGIN_ROOT:-.}` shell form is not substituted.
+  const agents = readdirSync(join(PLUGIN_DIR, 'agents'));
+  assert.ok(agents.length >= 1, 'plugins/antigravity must ship its agy-* subagents');
+  for (const file of agents) {
+    const body = readFileSync(join(PLUGIN_DIR, 'agents', file), 'utf-8');
+    const name = file.replace(/\.md$/, '');
+    assert.match(name, /^agy-/, `${file}: subagents are named agy-<alias>`);
+    assert.match(body, new RegExp(`^name: ${name}$`, 'm'), `${file}: name must match the file name`);
+    const command = body.match(/```bash\n([\s\S]*?)```/)?.[1] ?? '';
+    assert.ok(command.includes('node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" rescue --wait --model '), `${file}: must call the companion synchronously with a fixed model`);
+    assert.doesNotMatch(command, /dangerously|yolo|bypass|--effort/, `${file}: no permission bypass, and no --effort next to a model slug`);
+    assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `${file}: must not use the unsubstituted shell fallback`);
+    assert.doesNotMatch(body, /^permissionMode:/m, `${file}: must not set a permission mode`);
+  }
   assert.ok(existsSync(join(PLUGIN_DIR, 'skills', 'antigravity-code-review', 'SKILL.md')), 'missing skills/antigravity-code-review/SKILL.md');
 
   // The loop lives only in the claudegravity-loop plugin; /antigravity:loop must delegate, not bundle a copy.

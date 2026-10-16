@@ -200,6 +200,38 @@ test('review always runs in the background, read-only', () => {
   }
 });
 
+test('--model without --effort sends no --effort: agy rejects one that disagrees with the slug', () => {
+  const dir = tempProject();
+  try {
+    assert.equal(runCompanion(dir, 'rescue', '--model gemini-3.8-flash-low fix it').status, 0);
+    const { args } = readJobState(dir);
+    assert.ok(!args.includes('--effort'), `unexpected --effort in ${args.join(' ')}`);
+    assert.equal(args[args.indexOf('--model') + 1], 'gemini-3.8-flash-low');
+  } finally {
+    cleanup(dir);
+  }
+  const plain = tempProject();
+  try {
+    assert.equal(runCompanion(plain, 'rescue', 'fix it').status, 0);
+    const { args } = readJobState(plain);
+    assert.equal(args[args.indexOf('--effort') + 1], 'high', 'without a model the default effort stays high');
+  } finally {
+    cleanup(plain);
+  }
+});
+
+test('rescue --wait runs in the foreground and prints that job result with its exit code', () => {
+  const dir = tempProject();
+  try {
+    const res = runCompanion(dir, 'rescue', '--wait --model gemini-3.8-flash-medium fix it');
+    assert.equal(res.status, 9, 'the stand-in agy exits 9 and --wait must pass that on'); // node rejects agy's flags
+    assert.doesNotMatch(res.stdout, /in the background/);
+    assert.match(res.stdout, /=== Result for Task Rescue \(job-\d+\): FAILED ❌ \(exit 9\) ===/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('an invalid --effort is rejected before any job starts', () => {
   const dir = tempProject();
   try {

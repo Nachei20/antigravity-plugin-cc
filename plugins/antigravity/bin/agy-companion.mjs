@@ -19,7 +19,7 @@ const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 const PRINT_TIMEOUT = '30m';
 // Backstop in case agy ignores its own --print-timeout.
 const RUNNER_TIMEOUT_MS = 35 * 60 * 1000;
-const EFFORTS = ['low', 'medium', 'high', 'max'];
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // --- Helper Functions ---
 
@@ -115,6 +115,9 @@ export function cmdSetup() {
   console.log('\n=== Antigravity Companion Diagnostic ===\n');
   const agyPath = getAgyExecutable();
   console.log(`Detected Antigravity CLI binary: ${agyPath}`);
+  // Two installs can coexist (~/.gemini/bin and %LOCALAPPDATA%\agy\bin); pin one with AGY_BIN_PATH.
+  const version = spawnSync(agyPath, ['--version'], { encoding: 'utf-8', timeout: 30_000 });
+  console.log(`Antigravity CLI version: ${version.status === 0 ? version.stdout.trim() : `unknown (exit ${version.status})`}`);
 
   const testRun = spawnSync(agyPath, ['--help'], { encoding: 'utf-8', timeout: 30_000 });
   if (testRun.status === 0) {
@@ -138,8 +141,15 @@ export function cmdSetup() {
   console.log('  /antigravity:status | /antigravity:result | /antigravity:cancel\n');
 }
 
-export function agyArgs({ mode, effort, model = null, addDir = null }) {
-  const args = ['--mode', mode, '--effort', effort, '--print-timeout', PRINT_TIMEOUT];
+/**
+ * agy slugs carry their effort (gemini-3.8-flash-low), and an --effort that disagrees with --model is a hard error:
+ * --effort goes out only when asked for, or as the default when no model is named.
+ */
+export function agyArgs({ mode, effort = null, model = null, addDir = null }) {
+  effort ??= model ? null : 'high';
+  const args = ['--mode', mode];
+  if (effort) args.push('--effort', effort);
+  args.push('--print-timeout', PRINT_TIMEOUT);
   if (model) args.push('--model', model);
   if (addDir) args.push('--add-dir', addDir);
   return args;
@@ -159,8 +169,8 @@ function isolatedWorkspace() {
 
 const READ_ONLY_RULE = 'Do not create, modify or delete any file, and do not run commands that change state: reply with the review only.';
 
-export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high', model = null, addDir = null, cwd }) {
-  if (!EFFORTS.includes(effort)) {
+export function startAgyJob({ commandName, prompt, mode = 'plan', effort = null, model = null, addDir = null, cwd, wait = false }) {
+  if (effort && !EFFORTS.includes(effort)) {
     console.error(`Error: --effort must be one of ${EFFORTS.join(', ')} (got "${effort}").`);
     process.exit(1);
   }
@@ -183,6 +193,16 @@ export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high
   };
   writeFileSync(jobFile(id), JSON.stringify(jobMeta, null, 2), 'utf-8');
 
+  // --wait is for subagents, which cannot poll /antigravity:status: run here and print this job's result.
+  if (wait) {
+    writeFileSync(STATE_FILE, JSON.stringify(jobMeta, null, 2), 'utf-8');
+    console.log(`[Antigravity] Running ${commandName}${model ? ` with ${model}` : ''} and waiting (job ${id}).`);
+    runJob(id);
+    cmdResult(jobMeta);
+    process.exitCode = readExit(id)?.code ?? 1;
+    return;
+  }
+
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '__run-job', id], {
     detached: true,
     stdio: 'ignore',
@@ -197,7 +217,7 @@ export function startAgyJob({ commandName, prompt, mode = 'plan', effort = 'high
   jobMeta.pid = child.pid;
   writeFileSync(STATE_FILE, JSON.stringify(jobMeta, null, 2), 'utf-8');
 
-  console.log(`\n[Antigravity] Started ${commandName} in the background (mode: ${mode}, effort: ${effort}${model ? `, model: ${model}` : ''}).`);
+  console.log(`\n[Antigravity] Started ${commandName} in the background (mode: ${mode}, effort: ${effort ?? (model ? 'from model' : 'high')}${model ? `, model: ${model}` : ''}).`);
   console.log(`Job ID: ${id} (PID: ${child.pid}, time limit: ${PRINT_TIMEOUT})`);
   console.log('Check progress with: /antigravity:status');
   console.log('Read the answer with: /antigravity:result\n');
@@ -230,13 +250,16 @@ export function runJob(id) {
 export async function cmdReview(args) {
   let baseRef = null;
   let model = null;
-  let effort = 'high';
+  let effort = null;
+  let wait = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--base' && args[i + 1]) {
       baseRef = args[++i];
     } else if (args[i] === '--background') {
       // Accepted for compatibility: every job already runs in the background.
+    } else if (args[i] === '--wait') {
+      wait = true;
     } else if (args[i] === '--model' && args[i + 1]) {
       model = args[++i];
     } else if (args[i] === '--effort' && args[i + 1]) {
@@ -269,13 +292,13 @@ export async function cmdReview(args) {
     '```',
   ].join('\n');
 
-  startAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort, model, cwd: isolatedWorkspace() });
+  startAgyJob({ commandName: 'Code Review', prompt, mode: 'plan', effort, model, cwd: isolatedWorkspace(), wait });
 }
 
 export async function cmdAdversarialReview(args) {
   let baseRef = null;
   let model = null;
-  let effort = 'high';
+  let effort = null;
   const focusWords = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -318,11 +341,14 @@ export async function cmdAdversarialReview(args) {
 
 export async function cmdRescue(args) {
   let model = null;
-  let effort = 'high';
+  let effort = null;
+  let wait = false;
   const taskWords = [];
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--model' && args[i + 1]) {
+    if (args[i] === '--wait') {
+      wait = true;
+    } else if (args[i] === '--model' && args[i + 1]) {
       model = args[++i];
     } else if (args[i] === '--effort' && args[i + 1]) {
       effort = args[++i];
@@ -349,12 +375,12 @@ export async function cmdRescue(args) {
     status ? `Current Git Status:\n${status}\n` : '',
   ].join('\n');
 
-  startAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort, model, addDir: process.cwd(), cwd: process.cwd() });
+  startAgyJob({ commandName: 'Task Rescue', prompt, mode: 'accept-edits', effort, model, addDir: process.cwd(), cwd: process.cwd(), wait });
 }
 
 export async function cmdTransfer(args) {
   let model = null;
-  let effort = 'high';
+  let effort = null;
   const notesWords = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -391,7 +417,8 @@ export async function cmdTransfer(args) {
   const handoffFile = join(JOBS_DIR, `transfer-${Date.now()}.md`);
   writeFileSync(handoffFile, prompt, 'utf-8');
 
-  const flags = [`--effort ${effort}`, model ? `--model ${model}` : ''].filter(Boolean).join(' ');
+  // Same rule as agyArgs: no --effort next to a model unless asked for.
+  const flags = [effort || !model ? `--effort ${effort ?? 'high'}` : '', model ? `--model ${model}` : ''].filter(Boolean).join(' ');
   console.log(`\n[Antigravity] Handoff written to ${handoffFile} (branch: ${branch}).`);
   console.log('Run this in your own terminal to continue in an interactive Antigravity session:\n');
   console.log(`  agy -i "Read the handoff file ${handoffFile} and continue the work it describes." --mode accept-edits --add-dir "${process.cwd()}" ${flags}\n`);
@@ -419,13 +446,13 @@ export function cmdStatus() {
   }
 }
 
-export function cmdResult() {
-  if (!existsSync(STATE_FILE)) {
+export function cmdResult(state = null) {
+  if (!state && !existsSync(STATE_FILE)) {
     console.log('[Antigravity] No job records found.');
     return;
   }
 
-  const state = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+  state ??= JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
   if (!existsSync(state.logFile)) {
     console.log('[Antigravity] Log file does not exist yet.');
     return;
@@ -508,9 +535,9 @@ switch (command) {
 Antigravity Plugin for Claude Code (CLI Companion)
 
 Commands:
-  review [--base <ref>] [--model <m>] [--effort <e>]                     background job, read-only
+  review [--base <ref>] [--model <m>] [--effort <e>] [--wait]            background job (or --wait), read-only
   adversarial-review [--base <ref>] [--model <m>] [--effort <e>] <focus>  background job, read-only
-  rescue [--model <m>] [--effort <e>] <task>                              background job, edits the repo
+  rescue [--model <m>] [--effort <e>] [--wait] <task>                     background job (or --wait), edits the repo
   transfer [--model <m>] [--effort <e>] [notes]                           prints an agy -i command
   status
   result
