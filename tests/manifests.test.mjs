@@ -45,7 +45,7 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
     const name = file.replace(/\.md$/, '');
     assert.match(name, /^agy-/, `${file}: subagents are named agy-<alias>`);
     assert.match(body, new RegExp(`^name: ${name}$`, 'm'), `${file}: name must match the file name`);
-    const command = body.match(/```bash\n([\s\S]*?)```/)?.[1] ?? '';
+    const command = body.match(/```bash\r?\n([\s\S]*?)```/)?.[1] ?? '';
     assert.ok(command.includes('node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" rescue --wait --model '), `${file}: must call the companion synchronously with a fixed model`);
     assert.doesNotMatch(command, /dangerously|yolo|bypass|--effort/, `${file}: no permission bypass, and no --effort next to a model slug`);
     assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `${file}: must not use the unsubstituted shell fallback`);
