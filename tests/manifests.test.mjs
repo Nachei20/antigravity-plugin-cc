@@ -33,20 +33,34 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
     assert.equal(plugin[key], undefined, `plugin.json must not declare '${key}': rely on the default ${key}/ directory`);
   }
 
-  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'loop']) {
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'quota', 'loop']) {
     assert.ok(existsSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`)), `missing commands/${cmd}.md`);
   }
   // One subagent per agy model. CLAUDE_PLUGIN_ROOT is unset in a subagent's Bash tool, but Claude Code substitutes the
   // literal ${CLAUDE_PLUGIN_ROOT} in agent bodies; the `${CLAUDE_PLUGIN_ROOT:-.}` shell form is not substituted.
+  const expectedAgents = {
+    'agy-gemini-neon.md': 'gemini-4-neon-high',
+    'agy-gemini-argon.md': 'gemini-4-argon-high',
+    'agy-gemini-hydrogen.md': 'gemini-4-hydrogen-medium',
+    'agy-gemini-flash.md': 'gemini-3.8-flash-medium',
+    'agy-orchestrator-neon.md': 'gemini-pro-orchestrator-neon',
+    'agy-orchestrator-argon.md': 'gemini-pro-orchestrator-g1-pro',
+    'agy-claude-sonnet.md': 'claude-sonnet-5-5-medium',
+    'agy-claude-opus.md': 'claude-opus-5-5-high',
+    'agy-gpt-oss.md': 'gpt-oss-120b-medium',
+  };
   const agents = readdirSync(join(PLUGIN_DIR, 'agents'));
-  assert.ok(agents.length >= 1, 'plugins/antigravity must ship its agy-* subagents');
+  assert.deepEqual(agents.slice().sort(), Object.keys(expectedAgents).sort(), 'plugins/antigravity/agents must ship one subagent per agy model');
   for (const file of agents) {
     const body = readFileSync(join(PLUGIN_DIR, 'agents', file), 'utf-8');
     const name = file.replace(/\.md$/, '');
     assert.match(name, /^agy-/, `${file}: subagents are named agy-<alias>`);
     assert.match(body, new RegExp(`^name: ${name}$`, 'm'), `${file}: name must match the file name`);
     const command = body.match(/```bash\r?\n([\s\S]*?)```/)?.[1] ?? '';
-    assert.ok(command.includes('node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" rescue --wait --model '), `${file}: must call the companion synchronously with a fixed model`);
+    assert.ok(
+      command.includes(`node "\${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" rescue --wait --model ${expectedAgents[file]} `),
+      `${file}: must call the companion synchronously with model ${expectedAgents[file]}`
+    );
     assert.doesNotMatch(command, /dangerously|yolo|bypass|--effort/, `${file}: no permission bypass, and no --effort next to a model slug`);
     assert.ok(!body.includes('CLAUDE_PLUGIN_ROOT:-'), `${file}: must not use the unsubstituted shell fallback`);
     assert.doesNotMatch(body, /^permissionMode:/m, `${file}: must not set a permission mode`);
@@ -66,7 +80,7 @@ test('plugins/antigravity/.claude-plugin/plugin.json is valid and all command fi
 
 test('companion commands run through `!` injection so ${CLAUDE_PLUGIN_ROOT} resolves', () => {
   // A fenced bash block is run by the model through the Bash tool, where CLAUDE_PLUGIN_ROOT is not set.
-  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup']) {
+  for (const cmd of ['review', 'adversarial-review', 'rescue', 'transfer', 'status', 'result', 'cancel', 'setup', 'quota']) {
     const body = readFileSync(join(PLUGIN_DIR, 'commands', `${cmd}.md`), 'utf-8');
     assert.ok(
       body.includes('!`node "${CLAUDE_PLUGIN_ROOT}/bin/agy-companion.mjs" ' + cmd),

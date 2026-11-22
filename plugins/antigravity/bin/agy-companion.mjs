@@ -7,8 +7,8 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,7 @@ const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 const PRINT_TIMEOUT = '30m';
 // Backstop in case agy ignores its own --print-timeout.
 const RUNNER_TIMEOUT_MS = 35 * 60 * 1000;
+const QUOTA_TIMEOUT_MS = 30_000;
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // --- Helper Functions ---
@@ -138,7 +139,8 @@ export function cmdSetup() {
   console.log('  /antigravity:adversarial-review [--base <ref>] [--model <m>] <focus>');
   console.log('  /antigravity:rescue [--model <m>] [--effort <e>] <task-or-bug>');
   console.log('  /antigravity:transfer [--model <m>] [--effort <e>] [notes]');
-  console.log('  /antigravity:status | /antigravity:result | /antigravity:cancel\n');
+  console.log('  /antigravity:status | /antigravity:result | /antigravity:cancel');
+  console.log('  /antigravity:quota\n');
 }
 
 /**
@@ -497,41 +499,160 @@ export function cmdCancel() {
   }
 }
 
+export function parseQuotaPayload(raw) {
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Invalid JSON from agy /usage: ${e.message}`);
+  }
+  if (payload?.status !== 'SUCCESS') {
+    const reason = payload?.error || payload?.response || `status ${payload?.status ?? 'unknown'}`;
+    throw new Error(`agy /usage failed: ${reason}`);
+  }
+  const data = payload?.command?.data;
+  if (!Array.isArray(data?.groups)) {
+    throw new Error('Unexpected agy /usage response: missing quota groups');
+  }
+  return data;
+}
+
+function formatResetCountdown(resetTime, now) {
+  if (!resetTime) return null;
+  const resetDate = new Date(resetTime);
+  if (Number.isNaN(resetDate.getTime())) return resetTime;
+  const diffMs = resetDate.getTime() - now.getTime();
+  if (diffMs <= 0) return `resets now · ${resetTime}`;
+
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  let relative;
+  if (days > 0) relative = hours > 0 ? `in ${days}d ${hours}h` : `in ${days}d`;
+  else if (hours > 0) relative = minutes > 0 ? `in ${hours}h ${minutes}m` : `in ${hours}h`;
+  else if (minutes > 0) relative = `in ${minutes}m`;
+  else relative = 'in <1m';
+
+  return `resets ${relative} · ${resetTime}`;
+}
+
+function formatQuotaBucket(bucket, now) {
+  if (!bucket) return 'N/A';
+  const fraction = bucket.remaining_fraction;
+  const pct = typeof fraction === 'number' && Number.isFinite(fraction)
+    ? `${String(Math.round(fraction * 100)).padStart(3)}%`
+    : 'N/A';
+  if (pct === 'N/A') return 'N/A';
+  const reset = formatResetCountdown(bucket.reset_time, now);
+  return reset ? `${pct} remaining (${reset})` : `${pct} remaining`;
+}
+
+export function formatQuotaReport(data, { now = new Date() } = {}) {
+  const groups = data?.groups ?? [];
+  if (groups.length === 0) {
+    return '[Antigravity] No quota information available.';
+  }
+
+  const lines = ['', '=== Antigravity Model Quotas ===', ''];
+  for (const group of groups) {
+    const modelsMatch = typeof group.description === 'string'
+      ? group.description.match(/^Models within this group:\s*(.+)$/i)
+      : null;
+    lines.push(modelsMatch ? `${group.name} (${modelsMatch[1].trim()})` : group.name);
+
+    const buckets = Array.isArray(group.buckets) ? group.buckets : [];
+    const fiveHour = buckets.find((b) => b.window === '5h');
+    const weekly = buckets.find((b) => b.window === 'weekly');
+    lines.push(`  5h session: ${formatQuotaBucket(fiveHour, now)}`);
+    lines.push(`  Weekly:     ${formatQuotaBucket(weekly, now)}`);
+
+    for (const extra of buckets.filter((b) => b.window !== '5h' && b.window !== 'weekly')) {
+      const label = extra.name || extra.window || 'Other';
+      lines.push(`  ${label}: ${formatQuotaBucket(extra, now)}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+export function cmdQuota({ run = spawnSync, now = new Date(), print = true } = {}) {
+  const res = run(getAgyExecutable(), ['-p', '/usage', '--output-format', 'json'], {
+    encoding: 'utf-8',
+    timeout: QUOTA_TIMEOUT_MS,
+    windowsHide: true,
+  });
+
+  if (res.error || res.status !== 0) {
+    const detail = res.error?.message || res.stderr?.trim() || res.stdout?.trim() || `exit ${res.status}`;
+    console.error(`[Antigravity] Failed to fetch Antigravity quota: ${detail}`);
+    process.exitCode = res.status || 1;
+    return null;
+  }
+
+  try {
+    const data = parseQuotaPayload(res.stdout);
+    const report = formatQuotaReport(data, { now });
+    if (print) console.log(report);
+    return report;
+  } catch (e) {
+    console.error(`[Antigravity] Failed to fetch Antigravity quota: ${e.message}`);
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 // --- Main CLI Router ---
 
-const [command, ...rawArgs] = process.argv.slice(2);
-const args = splitArgs(rawArgs);
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  const selfPath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(resolve(process.argv[1])) === realpathSync(selfPath);
+  } catch {
+    return resolve(process.argv[1]) === selfPath;
+  }
+}
 
-switch (command) {
-  case 'review':
-    await cmdReview(args);
-    break;
-  case 'adversarial-review':
-    await cmdAdversarialReview(args);
-    break;
-  case 'rescue':
-    await cmdRescue(args);
-    break;
-  case 'transfer':
-    await cmdTransfer(args);
-    break;
-  case 'status':
-    cmdStatus();
-    break;
-  case 'result':
-    cmdResult();
-    break;
-  case 'cancel':
-    cmdCancel();
-    break;
-  case 'setup':
-    cmdSetup();
-    break;
-  case '__run-job': // internal: the detached body of every background job
-    runJob(args[0]);
-    break;
-  default:
-    console.log(`
+if (isDirectRun()) {
+  const [command, ...rawArgs] = process.argv.slice(2);
+  const args = splitArgs(rawArgs);
+
+  switch (command) {
+    case 'review':
+      await cmdReview(args);
+      break;
+    case 'adversarial-review':
+      await cmdAdversarialReview(args);
+      break;
+    case 'rescue':
+      await cmdRescue(args);
+      break;
+    case 'transfer':
+      await cmdTransfer(args);
+      break;
+    case 'status':
+      cmdStatus();
+      break;
+    case 'result':
+      cmdResult();
+      break;
+    case 'cancel':
+      cmdCancel();
+      break;
+    case 'setup':
+      cmdSetup();
+      break;
+    case 'quota':
+    case 'usage':
+      cmdQuota();
+      break;
+    case '__run-job': // internal: the detached body of every background job
+      runJob(args[0]);
+      break;
+    default:
+      console.log(`
 Antigravity Plugin for Claude Code (CLI Companion)
 
 Commands:
@@ -542,7 +663,9 @@ Commands:
   status
   result
   cancel
+  quota                                                                   remaining 5h and weekly model quotas
   setup
 `);
-    break;
+      break;
+  }
 }

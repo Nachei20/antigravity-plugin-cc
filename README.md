@@ -21,7 +21,8 @@ This plugin bridges **Anthropic Claude Code** and **Google Antigravity**, elimin
 | `/antigravity:adversarial-review` | Read-only · background | Steerable, skeptical audit challenging architecture, race conditions, and hidden failure modes. |
 | `/antigravity:rescue` | Edit mode · background | Delegates a difficult bug, failing test, or stuck task to Antigravity (`agy --mode accept-edits`), which edits this repository. |
 | `/antigravity:transfer` | Handoff | Writes the git state and your notes to a handoff file and prints the `agy -i` command to continue in your own terminal. |
-| `agy-gemini-flash`, `agy-gemini-argon`, `agy-claude-sonnet`, `agy-claude-opus`, `agy-gpt-oss` | Subagents · edit mode | One per Antigravity model: hand a task to that model (`rescue --wait --model <slug>`) and check the result with `git status`/`git diff` instead of trusting agy's SUCCESS. |
+| `agy-gemini-neon`, `agy-gemini-argon`, `agy-gemini-hydrogen`, `agy-gemini-flash`, `agy-orchestrator-neon`, `agy-orchestrator-argon`, `agy-claude-sonnet`, `agy-claude-opus`, `agy-gpt-oss` | Subagents · edit mode | One per Antigravity model: hand a task to that model (`rescue --wait --model <slug>`) and check the result with `git status`/`git diff` instead of trusting agy's SUCCESS. |
+| `/antigravity:quota` | Utility | Shows remaining quota per model group for both 5-hour and weekly sessions (plus reset times). |
 | `/antigravity:status` | Utility | Checks the status of background review jobs. |
 | `/antigravity:result` | Utility | Retrieves the output of completed background jobs. |
 | `/antigravity:cancel` | Utility | Cancels an ongoing background job. |
@@ -141,7 +142,17 @@ Every command supports specifying custom models or reasoning effort levels:
 
 ---
 
-### 6. Background Job Management
+### 6. Model Quotas (`/antigravity:quota`)
+
+Check your remaining Antigravity quota across model groups for both the rolling **5-hour session** and the **weekly** cap, along with reset times (runs `agy -p /usage --output-format json` without consuming model tokens):
+
+```bash
+/antigravity:quota
+```
+
+---
+
+### 7. Background Job Management
 
 Reviews and rescues always run in the background: the command returns at once with a job ID. Each job has a 30-minute time limit, and its prompt and log live in `.agy-jobs/` (which ignores itself in git).
 
