@@ -1,6 +1,6 @@
 {
   "name": "antigravity",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Google Antigravity plugin for Claude Code: cross-model code review, adversarial design stress-tests, and task rescue delegation.",
   "author": {
     "name": "Nacho"

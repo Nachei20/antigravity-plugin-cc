@@ -4,11 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { dirname, resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const COMPANION_PATH = join(ROOT, 'plugins', 'antigravity', 'bin', 'agy-companion.mjs');
+const COMPANION_URL = pathToFileURL(COMPANION_PATH).href;
 const JOBS_DIR = join(ROOT, '.agy-jobs');
 const STATE_FILE = join(JOBS_DIR, 'last-job.json');
 
@@ -35,6 +36,7 @@ test('companion prints usage on unknown command or empty arguments', () => {
   assert.match(res.stdout, /adversarial-review/);
   assert.match(res.stdout, /rescue/);
   assert.match(res.stdout, /transfer/);
+  assert.match(res.stdout, /quota/);
   assert.match(res.stdout, /--model/);
   assert.match(res.stdout, /--effort/);
 });
@@ -290,6 +292,155 @@ test('status reports the exit code once a job fails', () => {
     const res = runCompanion(dir, 'status');
     assert.match(res.stdout, /FAILED/);
     assert.match(res.stdout, /exit 9/); // node rejects agy's flags with exit code 9
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// --- Quota command ---
+
+const SAMPLE_USAGE_PAYLOAD = {
+  conversation_id: '',
+  status: 'SUCCESS',
+  num_turns: 0,
+  command: {
+    name: 'usage',
+    data: {
+      groups: [
+        {
+          name: 'Gemini Models',
+          description: 'Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Orchestrator (Neon), Gemini 3.8 Flash',
+          buckets: [
+            {
+              id: 'gemini-weekly',
+              name: 'Weekly Limit Remaining',
+              window: 'weekly',
+              remaining_fraction: 0.8658,
+              reset_time: '2026-11-28T10:57:23Z',
+            },
+            {
+              id: 'gemini-5h',
+              name: 'Five Hour Limit Remaining',
+              window: '5h',
+              remaining_fraction: 0.9872,
+              reset_time: '2026-11-22T06:52:46Z',
+            },
+          ],
+        },
+        {
+          name: 'Claude and GPT models',
+          description: 'Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B',
+          buckets: [
+            {
+              id: '3p-weekly',
+              name: 'Weekly Limit Remaining',
+              window: 'weekly',
+              remaining_fraction: 0.4912,
+              reset_time: '2026-11-28T21:26:55Z',
+            },
+            {
+              id: '3p-5h',
+              name: 'Five Hour Limit Remaining',
+              window: '5h',
+              remaining_fraction: 0,
+              reset_time: '2026-11-22T02:26:55Z',
+            },
+          ],
+        },
+        {
+          name: 'Gemini 4 Argon',
+          description: 'For paid Pro plans, Argon quota is separate.',
+          buckets: [
+            {
+              id: 'gemini-argon-wtu-weekly',
+              name: 'Gemini 4 Argon Weekly Limit',
+              window: 'weekly',
+              remaining_fraction: 0.1492,
+              reset_time: '2026-11-28T09:56:58Z',
+            },
+          ],
+        },
+      ],
+    },
+  },
+};
+
+test('parseQuotaPayload validates JSON structure and rejects malformed responses', async () => {
+  const { parseQuotaPayload } = await import(COMPANION_URL);
+
+  const data = parseQuotaPayload(JSON.stringify(SAMPLE_USAGE_PAYLOAD));
+  assert.equal(data.groups.length, 3);
+
+  assert.throws(() => parseQuotaPayload('not json'), /Invalid JSON/i);
+  assert.throws(() => parseQuotaPayload(JSON.stringify({ status: 'ERROR', error: 'no quota' })), /no quota/i);
+  assert.throws(() => parseQuotaPayload(JSON.stringify({ status: 'SUCCESS', command: {} })), /quota groups/i);
+});
+
+test('formatQuotaReport renders 5h and weekly sessions, 0% remaining, and weekly-only groups', async () => {
+  const { formatQuotaReport } = await import(COMPANION_URL);
+
+  const now = new Date('2026-11-22T01:55:00Z');
+  const report = formatQuotaReport(SAMPLE_USAGE_PAYLOAD.command.data, { now });
+
+  assert.match(report, /Antigravity Model Quotas/);
+  assert.match(report, /Gemini Models \(Gemini 4 Neon, Gemini 4 Hydrogen, Orchestrator \(Neon\), Gemini 3\.8 Flash\)/);
+  assert.match(report, /5h session:\s+99% remaining \(resets in 4h 57m · 2026-11-22T06:52:46Z\)/);
+  assert.match(report, /Weekly:\s+87% remaining \(resets in 6d 9h · 2026-11-28T10:57:23Z\)/);
+
+  assert.match(report, /Claude and GPT models \(Claude Opus 5\.5, Claude Sonnet 5\.5, GPT-OSS 120B\)/);
+  assert.match(report, /5h session:\s+0% remaining \(resets in 31m · 2026-11-22T02:26:55Z\)/);
+  assert.match(report, /Weekly:\s+49% remaining \(resets in 6d 19h · 2026-11-28T21:26:55Z\)/);
+
+  assert.match(report, /Gemini 4 Argon\n\s+5h session:\s+N\/A\n\s+Weekly:\s+15% remaining/);
+});
+
+test('formatQuotaReport handles empty groups and already-elapsed reset times', async () => {
+  const { formatQuotaReport } = await import(COMPANION_URL);
+
+  assert.match(formatQuotaReport({ groups: [] }), /No quota information available/i);
+
+  const report = formatQuotaReport(
+    {
+      groups: [
+        {
+          name: 'Gemini Models',
+          buckets: [{ window: '5h', remaining_fraction: 1, reset_time: '2026-11-22T01:00:00Z' }],
+        },
+      ],
+    },
+    { now: new Date('2026-11-22T02:00:00Z') }
+  );
+  assert.match(report, /100% remaining \(resets now · 2026-11-22T01:00:00Z\)/);
+});
+
+test('cmdQuota calls agy -p /usage --output-format json and formats the response', async () => {
+  const { cmdQuota } = await import(COMPANION_URL);
+  let captured;
+  const output = cmdQuota({
+    run: (bin, args, opts) => {
+      captured = { bin, args, opts };
+      return { status: 0, stdout: JSON.stringify(SAMPLE_USAGE_PAYLOAD), stderr: '' };
+    },
+    now: new Date('2026-11-22T01:55:00Z'),
+    print: false,
+  });
+
+  assert.deepEqual(captured.args, ['-p', '/usage', '--output-format', 'json']);
+  assert.ok(captured.opts.timeout > 0, 'quota call must set an explicit timeout');
+  assert.match(output, /Gemini Models/);
+  assert.match(output, /5h session:\s+99% remaining/);
+  assert.match(output, /Weekly:\s+87% remaining/);
+});
+
+test('quota and usage commands report agy failures with non-zero exit instead of printing usage help', () => {
+  const dir = tempProject();
+  try {
+    for (const sub of ['quota', 'usage']) {
+      const res = runCompanion(dir, sub);
+      assert.notEqual(res.status, 0, `${sub} must fail when agy fails`);
+      assert.match(res.stderr, /Failed to fetch Antigravity quota/);
+      assert.doesNotMatch(res.stdout, /Antigravity Plugin for Claude Code/);
+    }
   } finally {
     cleanup(dir);
   }
